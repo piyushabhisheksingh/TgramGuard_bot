@@ -76,8 +76,8 @@ export function settingsMiddleware() {
     const msg = [
       'Settings commands:',
       'Bot owner only:',
-      '  /botadmin_add <user_id> — add a bot admin',
-      '  /botadmin_remove <user_id> — remove a bot admin',
+      '  /botadmin_add <user_id> — or reply to a user to add as bot admin',
+      '  /botadmin_remove <user_id> — or reply to a user to remove from bot admins',
       'Bot owner or bot admin:',
       '  /rule_global_enable <rule> — enable a rule globally',
       '  /rule_global_disable <rule> — disable a rule globally',
@@ -99,18 +99,36 @@ export function settingsMiddleware() {
   // Admin management (owner only)
   composer.command('botadmin_add', async (ctx) => {
     if (!isBotOwner(ctx)) return;
-    const [, idStr] = ctx.message.text.trim().split(/\s+/, 2);
-    const id = Number(idStr);
-    if (!Number.isFinite(id)) return ctx.reply('Usage: /botadmin_add <user_id>');
+    const replyFrom = ctx.message?.reply_to_message?.from;
+    let id = replyFrom?.id;
+    if (!Number.isFinite(id)) {
+      const [, idStr] = ctx.message.text.trim().split(/\s+/, 2);
+      id = Number(idStr);
+    }
+    if (!Number.isFinite(id)) {
+      return ctx.reply('Usage: Reply to a user with /botadmin_add, or provide /botadmin_add <user_id>');
+    }
+    if (replyFrom?.is_bot) {
+      return ctx.reply('Bots cannot be promoted to bot admin.');
+    }
     await addBotAdmin(id);
     return ctx.reply(`Added bot admin: ${id}`);
   });
 
   composer.command('botadmin_remove', async (ctx) => {
     if (!isBotOwner(ctx)) return;
-    const [, idStr] = ctx.message.text.trim().split(/\s+/, 2);
-    const id = Number(idStr);
-    if (!Number.isFinite(id)) return ctx.reply('Usage: /botadmin_remove <user_id>');
+    const replyFrom = ctx.message?.reply_to_message?.from;
+    let id = replyFrom?.id;
+    if (!Number.isFinite(id)) {
+      const [, idStr] = ctx.message.text.trim().split(/\s+/, 2);
+      id = Number(idStr);
+    }
+    if (!Number.isFinite(id)) {
+      return ctx.reply('Usage: Reply to a user with /botadmin_remove, or provide /botadmin_remove <user_id>');
+    }
+    if (replyFrom?.is_bot) {
+      return ctx.reply('Bots are not in the bot admin list.');
+    }
     await removeBotAdmin(id);
     return ctx.reply(`Removed bot admin: ${id}`);
   });
