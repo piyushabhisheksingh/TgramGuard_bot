@@ -220,5 +220,65 @@ export function settingsMiddleware() {
     return ctx.reply(`Whitelisted user IDs:\n${list.join('\n')}`);
   });
 
+  // Bot command menu management
+  // Set up command list for users and for all chat administrators
+  composer.command('set_mycommands', async (ctx) => {
+    if (!(await isBotAdminOrOwner(ctx))) return;
+    try {
+      // Default (all users) concise commands
+      await ctx.api.setMyCommands(
+        [
+          { command: 'ping', description: 'Check bot availability' },
+          { command: 'settings', description: 'Show settings help' },
+          { command: 'rules_status', description: 'Show rules status' },
+        ],
+        { scope: { type: 'default' } }
+      );
+
+      // Admin commands menu for all chat administrators
+      await ctx.api.setMyCommands(
+        [
+          { command: 'rules_status', description: 'Show rules status' },
+          { command: 'rule_chat_enable', description: 'Enable a rule in this chat' },
+          { command: 'rule_chat_disable', description: 'Disable a rule in this chat' },
+          { command: 'maxlen_chat_set', description: 'Set max message length for chat' },
+          { command: 'whitelist_add', description: 'Whitelist a user ID in this chat' },
+          { command: 'whitelist_remove', description: 'Remove a whitelisted user ID' },
+          { command: 'whitelist_list', description: 'List chat whitelist' },
+        ],
+        { scope: { type: 'all_chat_administrators' } }
+      );
+
+      // Owner-level commands (optional): keep minimal to avoid clutter
+      // Uncomment to expose owner tools globally
+      // await ctx.api.setMyCommands(
+      //   [
+      //     { command: 'botadmin_add', description: 'Add a bot admin (owner only)' },
+      //     { command: 'botadmin_remove', description: 'Remove a bot admin' },
+      //     { command: 'rule_global_enable', description: 'Enable a rule globally' },
+      //     { command: 'rule_global_disable', description: 'Disable a rule globally' },
+      //     { command: 'maxlen_global_set', description: 'Set global max length' },
+      //   ],
+      //   { scope: { type: 'default' } }
+      // );
+
+      return ctx.reply('Bot commands have been set.');
+    } catch (e) {
+      return ctx.reply(`Failed to set commands: ${e?.description || e?.message || e}`);
+    }
+  });
+
+  // Remove command menu (default and admin scopes)
+  composer.command('remove_mycommands', async (ctx) => {
+    if (!(await isBotAdminOrOwner(ctx))) return;
+    try {
+      await ctx.api.deleteMyCommands({ scope: { type: 'default' } });
+      await ctx.api.deleteMyCommands({ scope: { type: 'all_chat_administrators' } });
+      return ctx.reply('Bot commands have been removed.');
+    } catch (e) {
+      return ctx.reply(`Failed to remove commands: ${e?.description || e?.message || e}`);
+    }
+  });
+
   return composer;
 }
