@@ -13,6 +13,8 @@ import {
   addChatWhitelistUser,
   removeChatWhitelistUser,
   getChatWhitelist,
+  getChatRules,
+  getChatMaxLen,
 } from '../store/settings.js';
 
 // Utilities shared with security middleware (re-implemented minimal)
@@ -174,11 +176,12 @@ export function settingsMiddleware() {
   // Status
   composer.command('rules_status', async (ctx) => {
     const s = await getSettings();
-    const effective = await getEffectiveRules(String(ctx.chat.id));
-    const chatRules = s.chat_rules[String(ctx.chat.id)];
-    const effectiveMax = await getEffectiveMaxLen(String(ctx.chat.id));
+    const chatId = String(ctx.chat.id);
+    const effective = await getEffectiveRules(chatId);
+    const chatRules = await getChatRules(chatId);
+    const effectiveMax = await getEffectiveMaxLen(chatId);
     const globalMax = s.global_limits?.max_len ?? DEFAULT_LIMITS.max_len;
-    const chatMax = s.chat_limits?.[String(ctx.chat.id)]?.max_len;
+    const chatMax = await getChatMaxLen(chatId);
     const msg = formatRulesStatus(s.global_rules, chatRules, effective, {
       effectiveMax,
       globalMax,

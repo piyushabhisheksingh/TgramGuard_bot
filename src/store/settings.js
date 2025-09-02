@@ -1,6 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { DEFAULT_RULES, RULE_KEYS, DEFAULT_LIMITS } from '../rules.js';
+import { getSupabase } from './supabase.js';
 
 const DATA_DIR = path.join(process.cwd(), 'data');
 const FILE = path.join(DATA_DIR, 'settings.json');
@@ -33,26 +34,105 @@ async function ensureFile() {
 }
 
 let cache = null;
+const USE_SUPABASE = Boolean(process.env.SUPABASE_URL && process.env.SUPABASE_KEY);
+
+// Supabase: global settings stored in table bot_settings, key='settings'
+async function sbLoad() {
+  const supabase = getSupabase();
+  if (!supabase) return null;
+  const { data, error } = await supabase
+    .from('bot_settings')
+    .select('data')
+    .eq('key', 'settings')
+    .maybeSingle();
+  if (error) {
+    // If table missing or other error, fallback to file
+    return null;
+  }
+  if (!data) return null;
+  return data.data;
+}
+
+async function sbSave(current) {
+  const supabase = getSupabase();
+  if (!supabase) return false;
+  const { error } = await supabase
+    .from('bot_settings')
+    .upsert({ key: 'settings', data: current }, { onConflict: 'key' });
+  return !error;
+}
+
+// Supabase: per-chat settings stored in table chat_settings (chat_id PK)
+async function sbLoadChat(chatId) {
+  const supabase = getSupabase();
+  if (!supabase) return null;
+  const { data, error } = await supabase
+    .from('chat_settings')
+    .select('rules, limits, whitelist')
+    .eq('chat_id', String(chatId))
+    .maybeSingle();
+  if (error) return null;
+  if (!data) return null;
+  return {
+    rules: data.rules || {},
+    limits: data.limits || {},
+    whitelist: data.whitelist || [],
+  };
+}
+
+async function sbSaveChat(chatId, payload) {
+  const supabase = getSupabase();
+  if (!supabase) return false;
+  const row = {
+    chat_id: String(chatId),
+    rules: payload.rules || {},
+    limits: payload.limits || {},
+    whitelist: payload.whitelist || [],
+  };
+  const { error } = await supabase
+    .from('chat_settings')
+    .upsert(row, { onConflict: 'chat_id' });
+  return !error;
+}
 
 async function load() {
-  await ensureFile();
   if (cache) return cache;
+  // Prefer Supabase if configured
+  if (USE_SUPABASE) {
+    const fromSb = await sbLoad();
+    if (fromSb) {
+      cache = normalize(fromSb);
+      return cache;
+    }
+  }
+  await ensureFile();
   const raw = await fs.readFile(FILE, 'utf8');
   cache = JSON.parse(raw);
-  // Normalize missing fields
-  cache.bot_admin_ids ||= [];
-  cache.global_rules = { ...DEFAULT_RULES, ...(cache.global_rules || {}) };
-  cache.chat_rules ||= {};
-  cache.global_limits = { ...DEFAULT_LIMITS, ...(cache.global_limits || {}) };
-  cache.chat_limits ||= {};
-  cache.chat_whitelist ||= {};
+  cache = normalize(cache);
   return cache;
 }
 
+function normalize(s) {
+  const out = { ...s };
+  // Normalize missing fields
+  out.bot_admin_ids ||= [];
+  out.global_rules = { ...DEFAULT_RULES, ...(out.global_rules || {}) };
+  out.chat_rules ||= {};
+  out.global_limits = { ...DEFAULT_LIMITS, ...(out.global_limits || {}) };
+  out.chat_limits ||= {};
+  out.chat_whitelist ||= {};
+  return out;
+}
+
 async function save(current) {
+  cache = normalize(current);
+  // Try Supabase first if enabled
+  if (USE_SUPABASE) {
+    const ok = await sbSave(cache);
+    if (ok) return;
+  }
   await ensureFile();
-  cache = current;
-  await withLock(() => fs.writeFile(FILE, JSON.stringify(current, null, 2)));
+  await withLock(() => fs.writeFile(FILE, JSON.stringify(cache, null, 2)));
 }
 
 export async function getSettings() {
@@ -81,6 +161,12 @@ export async function setGlobalRule(rule, enabled) {
 
 export async function setChatRule(chatId, rule, enabled) {
   if (!RULE_KEYS.includes(rule)) throw new Error('Unknown rule');
+  if (USE_SUPABASE) {
+    const current = (await sbLoadChat(chatId)) || { rules: {}, limits: {}, whitelist: [] };
+    current.rules[rule] = Boolean(enabled);
+    await sbSaveChat(chatId, current);
+    return;
+  }
   const s = await load();
   if (!s.chat_rules[chatId]) s.chat_rules[chatId] = {};
   s.chat_rules[chatId][rule] = Boolean(enabled);
@@ -91,6 +177,11 @@ export async function isRuleEnabled(rule, chatId) {
   const s = await load();
   const globalOn = s.global_rules[rule] ?? true;
   if (!globalOn) return false;
+  if (USE_SUPABASE) {
+    const chat = (await sbLoadChat(chatId))?.rules || {};
+    const chatFlag = chat[rule];
+    return chatFlag === undefined ? true : Boolean(chatFlag);
+  }
   const chat = s.chat_rules[String(chatId)] || {};
   const chatFlag = chat[rule];
   return chatFlag === undefined ? true : Boolean(chatFlag);
@@ -132,6 +223,12 @@ export async function setGlobalMaxLenLimit(n) {
 
 export async function setChatMaxLenLimit(chatId, n) {
   const limit = normalizeLimit(n);
+  if (USE_SUPABASE) {
+    const current = (await sbLoadChat(chatId)) || { rules: {}, limits: {}, whitelist: [] };
+    current.limits.max_len = limit;
+    await sbSaveChat(chatId, current);
+    return;
+  }
   const s = await load();
   if (!s.chat_limits[String(chatId)]) s.chat_limits[String(chatId)] = {};
   s.chat_limits[String(chatId)].max_len = limit;
@@ -140,8 +237,14 @@ export async function setChatMaxLenLimit(chatId, n) {
 
 export async function getEffectiveMaxLen(chatId) {
   const s = await load();
-  const chat = s.chat_limits[String(chatId)] || {};
-  const chatLimit = chat.max_len;
+  let chatLimit;
+  if (USE_SUPABASE) {
+    const chat = (await sbLoadChat(chatId))?.limits || {};
+    chatLimit = chat.max_len;
+  } else {
+    const chat = s.chat_limits[String(chatId)] || {};
+    chatLimit = chat.max_len;
+  }
   const globalLimit = s.global_limits.max_len ?? DEFAULT_LIMITS.max_len;
   return Number.isFinite(chatLimit) ? chatLimit : globalLimit;
 }
@@ -156,6 +259,12 @@ function normalizeLimit(n) {
 
 // Whitelist API (per chat)
 export async function addChatWhitelistUser(chatId, userId) {
+  if (USE_SUPABASE) {
+    const current = (await sbLoadChat(chatId)) || { rules: {}, limits: {}, whitelist: [] };
+    if (!current.whitelist.includes(userId)) current.whitelist.push(userId);
+    await sbSaveChat(chatId, current);
+    return;
+  }
   const s = await load();
   const key = String(chatId);
   if (!s.chat_whitelist[key]) s.chat_whitelist[key] = [];
@@ -164,6 +273,12 @@ export async function addChatWhitelistUser(chatId, userId) {
 }
 
 export async function removeChatWhitelistUser(chatId, userId) {
+  if (USE_SUPABASE) {
+    const current = (await sbLoadChat(chatId)) || { rules: {}, limits: {}, whitelist: [] };
+    current.whitelist = current.whitelist.filter((id) => id !== userId);
+    await sbSaveChat(chatId, current);
+    return;
+  }
   const s = await load();
   const key = String(chatId);
   if (!s.chat_whitelist[key]) return;
@@ -172,12 +287,37 @@ export async function removeChatWhitelistUser(chatId, userId) {
 }
 
 export async function isUserWhitelisted(chatId, userId) {
+  if (USE_SUPABASE) {
+    const list = (await sbLoadChat(chatId))?.whitelist || [];
+    return list.includes(userId);
+  }
   const s = await load();
   const list = s.chat_whitelist[String(chatId)] || [];
   return list.includes(userId);
 }
 
 export async function getChatWhitelist(chatId) {
+  if (USE_SUPABASE) {
+    const list = (await sbLoadChat(chatId))?.whitelist || [];
+    return list.slice();
+  }
   const s = await load();
   return (s.chat_whitelist[String(chatId)] || []).slice();
+}
+
+// Additional helpers for status UIs
+export async function getChatRules(chatId) {
+  if (USE_SUPABASE) {
+    return ((await sbLoadChat(chatId))?.rules) || {};
+  }
+  const s = await load();
+  return s.chat_rules[String(chatId)] || {};
+}
+
+export async function getChatMaxLen(chatId) {
+  if (USE_SUPABASE) {
+    return (await sbLoadChat(chatId))?.limits?.max_len;
+  }
+  const s = await load();
+  return s.chat_limits[String(chatId)]?.max_len;
 }
