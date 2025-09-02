@@ -67,6 +67,75 @@ const explicitTerms = [
   /\bhorny\b/i,
   /\bthreesome\b/i,
   /\bbj\b/i,                           // shorthand blowjob
+  /\brim\s*job\b/i,                    // rimjob / rim job
+  /\brimming\b/i,
+  /\bpegging\b/i,
+  /\bsodomy\b/i,
+  /\bbesti[a@]lity\b/i,
+  /\bdild[o0]s?\b/i,
+  /\bvibrat[oe]rs?\b/i,
+  /\bbutt\s*plugs?\b/i,
+  /\bnb?\s*c?um\b/i,                   // nb cum (loose), cum already above
+  /\bjizz\b/i,
+  /\bspunk\b/i,
+  /\bboobies\b/i,
+  /\bnip+les?\b/i,                     // nipple(s)
+  /\bstrip\s*tease\b/i,
+  /\bcam\s*sex\b/i,
+  /\bwebcam\s*sex\b/i,
+  /\bsuck\s*my\b/i,
+
+  // Hinglish sexual/profanity (with common leet/spacing variants)
+  /\bm[a@]d[ae]r\s*ch[o0]d\b/i,        // madarchod, maderchod, m@darch0d
+  /\bbehen\s*ch[o0]d\b/i,             // behenchod with/without space
+  /\bbhen\s*ch[o0]d\b/i,              // bhen chod
+  /\bbh[o0]sd[i1]\s*k[e3]\b/i,        // bhosdi ke (spaced)
+  /\bbh[o0]s[a@]d[i1]k[e3]\b/i,        // bhosadike / bhosdike
+  /\bg[a@]a+nd\b/i,                    // gaand (ass)
+  /\bg[a@]a+ndu\b/i,                   // gaandu
+  /\bl[uµ]nd\b/i,                      // lund
+  /\bl[ao0]ud[ae]\b/i,                 // lauda / loda
+  /\bch[uµo0]{1,2}t\b/i,               // chut / choot / ch00t
+  /\bch[uµo0]{1,2}tiy?[ae]\b/i,        // chutiya / chutia / chutiye
+  /\bch[o0]de?\b/i,                    // chode / chod
+  /\bch[o0]d(n[ae]|[ae])\b/i,          // chodna / chodne / choda / chode
+  /\br[a@4]nd[i1y]\b/i,                // randi / r@ndi
+  /\brund[i1y]\b/i,                    // rundi
+  /\bbsdk\b/i,                         // bsdk (abbr.)
+  /\btatt[e3]s?\b/i,                   // tatte (balls)
+  /\bkan[dt]i\b/i,                     // kandi (slur)
+  /\bchinal\b/i,                       // chinal
+  /\bbalatk[a@]r\b/i,                  // balatkar (rape)
+  /\br[a4]pe\b/i,                      // rape / r4pe
+  /\bjh?a+nt\b/i,                      // jhant/jhaat (pubic hair)
+  /\bjh[a@]t[uú]\b/i,                  // jhatu
+  /\bka+m\s*i+n[ae]\b/i,               // kamina/kamine
+  /\bhar[a@]am[i1]([yz]ad[ae])?\b/i,   // harami, haramzade/haramzadi
+  /\bkutt[i1y][ae]?\b/i,               // kutti/kutty/kuttya
+  /\bkutt[e3]\b/i,                     // kutte
+  /\bkutt[e3]\s*ki\b/i,               // kutte ki
+
+  // Hindi (Devanagari) sexual/profanity
+  /मादरचोद/u,
+  /बहनचोद/u,
+  /भोसड़ी\s*के/u,
+  /भोसडी\s*के/u,
+  /लौड़ा/u,
+  /लौडे/u,
+  /लंड/u,
+  /गांड/u,
+  /गांड़/u,
+  /रंडी/u,
+  /चूत/u,
+  /चुद(ना|ाई|वाई|वाना)/u,
+  /चुत(िया|िये|िए|िया)/u,
+  /चोड(ना|ना|ता)/u,
+  /बलात्कार/u,
+  /हरामी/u,
+  /हरामजादा/u,
+  /हरामजादी/u,
+  /कुत्ती/u,
+  /कुत्ते/u,
 
   // general explicit/profanity (with some spaced/leet variants)
   /\bfuck\b/i,
