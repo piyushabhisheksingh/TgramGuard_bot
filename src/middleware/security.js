@@ -41,9 +41,9 @@ async function notifyAndCleanup(ctx, text, seconds = 30) {
       parse_mode: 'HTML',
       disable_web_page_preview: true,
     });
-    setTimeout(() => {
-      ctx.api.deleteMessage(chatId, sent.message_id).catch(() => {});
-    }, seconds * 1000);
+    // setTimeout(() => {
+    //   ctx.api.deleteMessage(chatId, sent.message_id).catch(() => {});
+    // }, seconds * 1000);
   } catch (e) {
     console.error('notifyAndCleanup error:', e);
   }
