@@ -34,15 +34,19 @@ function mentionHTML(user) {
 }
 
 async function notifyAndCleanup(ctx, text, seconds = 30) {
+  const chatId = ctx.chat?.id;
+  if (!chatId) return;
   try {
-    const sent = await ctx.api.sendMessage(ctx.chat.id, text, {
+    const sent = await ctx.api.sendMessage(chatId, text, {
       parse_mode: 'HTML',
       disable_web_page_preview: true,
     });
     setTimeout(() => {
-    //   ctx.api.deleteMessage(ctx.chat.id, sent.message_id).catch(() => {});
-    // }, seconds * 1000);
-  } catch (_) {}
+      ctx.api.deleteMessage(chatId, sent.message_id).catch(() => {});
+    }, seconds * 1000);
+  } catch (e) {
+    console.error('notifyAndCleanup error:', e);
+  }
 }
 
 async function checkUserBioStatus(ctx, userId) {
