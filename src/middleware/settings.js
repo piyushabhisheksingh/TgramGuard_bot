@@ -86,8 +86,8 @@ export function settingsMiddleware() {
       '  /rule_chat_enable <rule> — enable a rule for this chat',
       '  /rule_chat_disable <rule> — disable a rule for this chat',
       '  /maxlen_chat_set <n> — set max length limit for this chat',
-      '  /whitelist_add <user_id> — exempt a user in this chat',
-      '  /whitelist_remove <user_id> — remove exemption in this chat',
+      '  /whitelist_add <user_id> — or reply to a user to whitelist',
+      '  /whitelist_remove <user_id> — or reply to a user to unwhitelist',
       '  /whitelist_list — show chat whitelist',
       '  /rules_status — show global/chat/effective rule status',
       '',
@@ -193,9 +193,19 @@ export function settingsMiddleware() {
     const userId = ctx.from?.id;
     const ok = (await isBotAdminOrOwner(ctx)) || (await isChatAdminWithBan(ctx, userId));
     if (!ok) return;
-    const arg = ctx.message.text.trim().split(/\s+/, 2)[1];
-    const targetId = Number(arg);
-    if (!Number.isFinite(targetId)) return ctx.reply('Usage: /whitelist_add <user_id>');
+    // Prefer reply target if command is used as a reply
+    const replyFrom = ctx.message?.reply_to_message?.from;
+    let targetId = replyFrom?.id;
+    if (!Number.isFinite(targetId)) {
+      const arg = ctx.message.text.trim().split(/\s+/, 2)[1];
+      targetId = Number(arg);
+    }
+    if (!Number.isFinite(targetId)) {
+      return ctx.reply('Usage: Reply to a user with /whitelist_add, or provide /whitelist_add <user_id>');
+    }
+    if (replyFrom?.is_bot) {
+      return ctx.reply('Bots cannot be whitelisted.');
+    }
     await addChatWhitelistUser(String(ctx.chat.id), targetId);
     return ctx.reply(`User ${targetId} added to whitelist for this chat.`);
   });
@@ -204,9 +214,19 @@ export function settingsMiddleware() {
     const userId = ctx.from?.id;
     const ok = (await isBotAdminOrOwner(ctx)) || (await isChatAdminWithBan(ctx, userId));
     if (!ok) return;
-    const arg = ctx.message.text.trim().split(/\s+/, 2)[1];
-    const targetId = Number(arg);
-    if (!Number.isFinite(targetId)) return ctx.reply('Usage: /whitelist_remove <user_id>');
+    // Prefer reply target if command is used as a reply
+    const replyFrom = ctx.message?.reply_to_message?.from;
+    let targetId = replyFrom?.id;
+    if (!Number.isFinite(targetId)) {
+      const arg = ctx.message.text.trim().split(/\s+/, 2)[1];
+      targetId = Number(arg);
+    }
+    if (!Number.isFinite(targetId)) {
+      return ctx.reply('Usage: Reply to a user with /whitelist_remove, or provide /whitelist_remove <user_id>');
+    }
+    if (replyFrom?.is_bot) {
+      return ctx.reply('Bots cannot be whitelisted.');
+    }
     await removeChatWhitelistUser(String(ctx.chat.id), targetId);
     return ctx.reply(`User ${targetId} removed from whitelist for this chat.`);
   });
