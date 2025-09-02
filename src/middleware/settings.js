@@ -251,16 +251,16 @@ export function settingsMiddleware() {
 
       // Owner-level commands (optional): keep minimal to avoid clutter
       // Uncomment to expose owner tools globally
-      // await ctx.api.setMyCommands(
-      //   [
-      //     { command: 'botadmin_add', description: 'Add a bot admin (owner only)' },
-      //     { command: 'botadmin_remove', description: 'Remove a bot admin' },
-      //     { command: 'rule_global_enable', description: 'Enable a rule globally' },
-      //     { command: 'rule_global_disable', description: 'Disable a rule globally' },
-      //     { command: 'maxlen_global_set', description: 'Set global max length' },
-      //   ],
-      //   { scope: { type: 'default' } }
-      // );
+      await ctx.api.setMyCommands(
+        [
+          { command: 'botadmin_add', description: 'Add a bot admin (owner only)' },
+          { command: 'botadmin_remove', description: 'Remove a bot admin' },
+          { command: 'rule_global_enable', description: 'Enable a rule globally' },
+          { command: 'rule_global_disable', description: 'Disable a rule globally' },
+          { command: 'maxlen_global_set', description: 'Set global max length' },
+        ],
+        { scope: { type: 'default' } }
+      );
 
       return ctx.reply('Bot commands have been set.');
     } catch (e) {
