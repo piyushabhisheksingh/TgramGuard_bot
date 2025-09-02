@@ -6,16 +6,20 @@
   "description": "Telegram group security bot using grammY with message limits, no edits, link and explicit content filtering, and bio link checks.",
   "main": "src/bot.js",
   "scripts": {
-    "start": "node src/bot.js"
+    "start": "nodemon src/bot.js",
+    "dev": "nodemon"
   },
   "engines": {
     "node": ">=18"
   },
   "dependencies": {
-    "dotenv": "^16.4.5",
-    "grammy": "^1.38.2",
     "@grammyjs/auto-retry": "^2.0.2",
     "@grammyjs/runner": "^2.0.3",
-    "@grammyjs/transformer-throttler": "^1.2.1"
+    "@grammyjs/transformer-throttler": "^1.2.1",
+    "dotenv": "^16.4.5",
+    "grammy": "^1.38.2"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.10"
   }
 }

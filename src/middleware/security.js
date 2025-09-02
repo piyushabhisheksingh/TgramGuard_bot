@@ -33,16 +33,15 @@ function mentionHTML(user) {
   return `<a href="tg://user?id=${user.id}">${escapeHtml(name)}</a>`;
 }
 
-async function notifyAndCleanup(ctx, text, seconds = 8) {
+async function notifyAndCleanup(ctx, text, seconds = 30) {
   try {
     const sent = await ctx.api.sendMessage(ctx.chat.id, text, {
-      reply_to_message_id: ctx.msg?.message_id,
       parse_mode: 'HTML',
       disable_web_page_preview: true,
     });
     setTimeout(() => {
-      ctx.api.deleteMessage(ctx.chat.id, sent.message_id).catch(() => {});
-    }, seconds * 1000);
+    //   ctx.api.deleteMessage(ctx.chat.id, sent.message_id).catch(() => {});
+    // }, seconds * 1000);
   } catch (_) {}
 }
 
