@@ -2,12 +2,13 @@ import 'dotenv/config';
 import { Bot, webhookCallback } from 'grammy';
 import { run, sequentialize } from '@grammyjs/runner';
 import { autoRetry } from '@grammyjs/auto-retry';
-import { throttler } from '@grammyjs/transformer-throttler';
+import throttlerModule from '@grammyjs/transformer-throttler';
 import http from 'node:http';
 import { securityMiddleware } from './middleware/security.js';
 import { settingsMiddleware } from './middleware/settings.js';
 import { bootstrapAdminsFromEnv } from './store/settings.js';
 
+const { apiThrottler } = throttlerModule;
 const token = process.env.BOT_TOKEN;
 if (!token) {
   console.error('BOT_TOKEN is not set. Put it in .env');
@@ -20,7 +21,7 @@ const bot = new Bot(token);
 bot.api.config.use(autoRetry());
 
 // Flood limits: queue API calls to respect Telegram rate limits
-bot.api.config.use(throttler());
+bot.api.config.use(apiThrottler());
 
 // Concurrency safety: ensure per-chat (or user) sequential processing
 bot.use(
