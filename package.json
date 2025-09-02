@@ -1,0 +1,21 @@
+{
+  "name": "tg-group-security-bot",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Telegram group security bot using grammY with message limits, no edits, link and explicit content filtering, and bio link checks.",
+  "main": "src/bot.js",
+  "scripts": {
+    "start": "node src/bot.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "grammy": "^1.22.4",
+    "@grammyjs/auto-retry": "^2.0.2",
+    "@grammyjs/runner": "^2.0.4",
+    "@grammyjs/transformer-throttler": "^2.0.2"
+  }
+}
