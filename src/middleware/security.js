@@ -14,6 +14,10 @@ const bioModerationCache = new Map();
 // Map<`${chatId}:${userId}`, { isAdmin: boolean, until: number }>
 const adminStatusCache = new Map();
 
+// Cache the bot's own permissions per chat to reduce API calls
+// Map<chatId, { until: number, isAdmin: boolean, canDelete: boolean }>
+const botPermsCache = new Map();
+
 // Bot-level privileged users (owner + admins) via env
 const BOT_OWNER_ID = Number(process.env.BOT_OWNER_ID || NaN);
 const BOT_ADMIN_IDS = new Set(
@@ -33,20 +37,68 @@ function mentionHTML(user) {
   return `<a href="tg://user?id=${user.id}">${escapeHtml(name)}</a>`;
 }
 
-async function notifyAndCleanup(ctx, text, seconds = 30) {
+async function notifyAndCleanup(ctx, text, seconds = 8) {
   const chatId = ctx.chat?.id;
   if (!chatId) return;
+  const replyTo = ctx.msg?.message_id;
   try {
     const sent = await ctx.api.sendMessage(chatId, text, {
+      reply_to_message_id: replyTo,
       parse_mode: 'HTML',
       disable_web_page_preview: true,
     });
-    // setTimeout(() => {
-    //   ctx.api.deleteMessage(chatId, sent.message_id).catch(() => {});
-    // }, seconds * 1000);
-  } catch (e) {
-    console.error('notifyAndCleanup error:', e);
+    setTimeout(() => {
+      ctx.api.deleteMessage(chatId, sent.message_id).catch(() => {});
+    }, seconds * 1000);
+  } catch (_) {
+    try {
+      const sent = await ctx.api.sendMessage(chatId, text, {
+        parse_mode: 'HTML',
+        disable_web_page_preview: true,
+      });
+      setTimeout(() => {
+        ctx.api.deleteMessage(chatId, sent.message_id).catch(() => {});
+      }, seconds * 1000);
+    } catch (_) {}
   }
+}
+
+async function getBotPermissions(ctx) {
+  const chatId = ctx.chat?.id;
+  if (!chatId) return { isAdmin: false, canDelete: false };
+  const now = Date.now();
+  const cached = botPermsCache.get(chatId);
+  if (cached && cached.until > now) return { isAdmin: cached.isAdmin, canDelete: cached.canDelete };
+  try {
+    const meId = ctx.me?.id;
+    const member = meId ? await ctx.api.getChatMember(chatId, meId) : null;
+    const isAdmin = member?.status === 'administrator' || member?.status === 'creator';
+    const canDelete = Boolean(member?.can_delete_messages || member?.status === 'creator');
+    botPermsCache.set(chatId, { until: now + 60 * 1000, isAdmin, canDelete });
+    return { isAdmin, canDelete };
+  } catch (_) {
+    botPermsCache.set(chatId, { until: now + 30 * 1000, isAdmin: false, canDelete: false });
+    return { isAdmin: false, canDelete: false };
+  }
+}
+
+const lastPermWarn = new Map(); // Map<chatId, number>
+async function ensureBotCanDelete(ctx) {
+  const chatId = ctx.chat?.id;
+  if (!chatId) return false;
+  const { canDelete } = await getBotPermissions(ctx);
+  if (canDelete) return true;
+  const now = Date.now();
+  const last = lastPermWarn.get(chatId) || 0;
+  if (now - last > 10 * 60 * 1000) {
+    lastPermWarn.set(chatId, now);
+    await notifyAndCleanup(
+      ctx,
+      'I need admin permission "Delete messages" to enforce group rules. Please promote the bot and enable this permission.',
+      15
+    );
+  }
+  return false;
 }
 
 async function checkUserBioStatus(ctx, userId) {
@@ -77,13 +129,15 @@ export function securityMiddleware() {
     // Rule 2: No edits — delete edited messages (if enabled)
     if (ctx.editedMessage) {
       if (await isRuleEnabled('no_edit', ctx.chat.id)) {
-        try {
-          await ctx.api.deleteMessage(ctx.chat.id, ctx.editedMessage.message_id);
-          await notifyAndCleanup(
-            ctx,
-            `${mentionHTML(ctx.from)} editing messages is not allowed. Your message was removed.`
-          );
-        } catch (_) {}
+        if (await ensureBotCanDelete(ctx)) {
+          try {
+            await ctx.api.deleteMessage(ctx.chat.id, ctx.editedMessage.message_id);
+            await notifyAndCleanup(
+              ctx,
+              `${mentionHTML(ctx.from)} editing messages is not allowed. Your message was removed.`
+            );
+          } catch (_) {}
+        }
       }
       return; // do not continue other middlewares for edited messages
     }
@@ -105,15 +159,17 @@ export function securityMiddleware() {
           userId,
         );
         if (bioHasLink || bioHasExplicit) {
-        try {
-          await ctx.api.deleteMessage(ctx.chat.id, msg.message_id);
-          const reason = bioHasLink && bioHasExplicit
-            ? 'a link and explicit content'
-            : bioHasLink
-            ? 'a link'
-            : 'explicit content';
-          await notifyAndCleanup(ctx, `${mentionHTML(ctx.from)} cannot post because your bio contains ${reason}. Please update your bio to participate.`);
-        } catch (_) {}
+        if (await ensureBotCanDelete(ctx)) {
+          try {
+            await ctx.api.deleteMessage(ctx.chat.id, msg.message_id);
+            const reason = bioHasLink && bioHasExplicit
+              ? 'a link and explicit content'
+              : bioHasLink
+              ? 'a link'
+              : 'explicit content';
+            await notifyAndCleanup(ctx, `${mentionHTML(ctx.from)} cannot post because your bio contains ${reason}. Please update your bio to participate.`);
+          } catch (_) {}
+        }
         return;
         }
       }
@@ -123,13 +179,15 @@ export function securityMiddleware() {
     if (await isRuleEnabled('max_len', ctx.chat.id)) {
       const limit = await getEffectiveMaxLen(ctx.chat.id);
       if (overCharLimit(text, limit)) {
-      try {
-        await ctx.api.deleteMessage(ctx.chat.id, msg.message_id);
-        await notifyAndCleanup(
-          ctx,
-          `${mentionHTML(ctx.from)} messages longer than ${limit} characters are not allowed.`
-        );
-      } catch (_) {}
+      if (await ensureBotCanDelete(ctx)) {
+        try {
+          await ctx.api.deleteMessage(ctx.chat.id, msg.message_id);
+          await notifyAndCleanup(
+            ctx,
+            `${mentionHTML(ctx.from)} messages longer than ${limit} characters are not allowed.`
+          );
+        } catch (_) {}
+      }
       return;
       }
     }
@@ -137,22 +195,26 @@ export function securityMiddleware() {
     // Rule 4: No links
     const hasLink = entitiesContainLink(entities) || textHasLink(text);
     if ((await isRuleEnabled('no_links', ctx.chat.id)) && hasLink) {
-      try {
-        await ctx.api.deleteMessage(ctx.chat.id, msg.message_id);
-        await notifyAndCleanup(ctx, `${mentionHTML(ctx.from)} links are not allowed in this group.`);
-      } catch (_) {}
+      if (await ensureBotCanDelete(ctx)) {
+        try {
+          await ctx.api.deleteMessage(ctx.chat.id, msg.message_id);
+          await notifyAndCleanup(ctx, `${mentionHTML(ctx.from)} links are not allowed in this group.`);
+        } catch (_) {}
+      }
       return;
     }
 
     // Rule 3: No explicit content
     if ((await isRuleEnabled('no_explicit', ctx.chat.id)) && containsExplicit(text)) {
-      try {
-        await ctx.api.deleteMessage(ctx.chat.id, msg.message_id);
-        await notifyAndCleanup(
-          ctx,
-          `${mentionHTML(ctx.from)} explicit or sexual content is not allowed.`
-        );
-      } catch (_) {}
+      if (await ensureBotCanDelete(ctx)) {
+        try {
+          await ctx.api.deleteMessage(ctx.chat.id, msg.message_id);
+          await notifyAndCleanup(
+            ctx,
+            `${mentionHTML(ctx.from)} explicit or sexual content is not allowed.`
+          );
+        } catch (_) {}
+      }
       return;
     }
 
