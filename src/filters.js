@@ -156,10 +156,48 @@ const explicitTerms = [
 
 export function containsExplicit(text = "") {
   if (!text) return false;
-  return explicitTerms.some((rx) => rx.test(text));
+  // Fast path on raw text
+  if (explicitTerms.some((rx) => rx.test(text))) return true;
+  // Obfuscation-aware path: normalize text and run a looser check
+  const normalized = normalizeForExplicit(text);
+  return explicitTermsLoose.some((rx) => rx.test(normalized));
 }
 
 export function overCharLimit(text = "", limit = 200) {
   if (!text) return false;
   return [...text].length > limit; // count unicode codepoints
+}
+
+// --- Obfuscation handling ---
+// Build a loosened variant of patterns (no word boundaries) for normalized scan
+const explicitTermsLoose = explicitTerms.map((rx) => {
+  const src = rx.source.replace(/\\b/g, '');
+  let flags = rx.flags || '';
+  // Ensure case-insensitive by default for normalized text
+  if (!flags.includes('i')) flags += 'i';
+  // Preserve unicode flag if present
+  return new RegExp(src, flags);
+});
+
+function normalizeForExplicit(input = '') {
+  // Lowercase
+  let s = String(input).toLowerCase();
+  // Remove zero-width and joiner characters
+  s = s.replace(/[\u200B-\u200D\uFEFF\u2060]/g, '');
+  // NFKD normalize and strip diacritics for Latin script
+  try {
+    s = s.normalize('NFKD').replace(/\p{M}+/gu, '');
+  } catch (_) {}
+  // Leetspeak substitutions
+  const map = {
+    '0': 'o', '1': 'i', '!': 'i', '3': 'e', '4': 'a', '@': 'a', '$': 's', '5': 's', '7': 't', '8': 'b', '9': 'g', 'µ': 'u',
+    // Common Cyrillic confusables → Latin
+    'а': 'a', 'е': 'e', 'о': 'o', 'р': 'p', 'с': 's', 'х': 'x', 'у': 'y', 'і': 'i', 'ї': 'i', 'ј': 'j',
+  };
+  s = s.replace(/[01!34@\$5789µаеорсхуіїј]/g, (ch) => map[ch] || ch);
+  // Remove common separators and punctuation to collapse obfuscations like s.e.x, s_e-x
+  s = s.replace(/[\s._\-\|*`'"~^+\=\/\\()\[\]{}:,;<>]+/g, '');
+  // Collapse repeated characters (3+ → 2) to catch exxxtreme repeats
+  s = s.replace(/([a-z\u0900-\u097F])\1{2,}/g, '$1$1');
+  return s;
 }
