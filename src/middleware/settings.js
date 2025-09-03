@@ -1,4 +1,5 @@
 import { Composer } from 'grammy';
+import { logAction } from '../logger.js';
 import { RULE_KEYS, DEFAULT_RULES, DEFAULT_LIMITS } from '../rules.js';
 import {
   addBotAdmin,
@@ -114,6 +115,7 @@ export function settingsMiddleware() {
       return ctx.reply('Bots cannot be promoted to bot admin.');
     }
     await addBotAdmin(id);
+    await logAction(ctx, { action: 'botadmin_add', action_type: 'admin', user: replyFrom || { id }, chat: ctx.chat, violation: '-', content: `Added bot admin: ${id}` });
     return ctx.reply(`Added bot admin: ${id}`);
   });
 
@@ -132,6 +134,7 @@ export function settingsMiddleware() {
       return ctx.reply('Bots are not in the bot admin list.');
     }
     await removeBotAdmin(id);
+    await logAction(ctx, { action: 'botadmin_remove', action_type: 'admin', user: replyFrom || { id }, chat: ctx.chat, violation: '-', content: `Removed bot admin: ${id}` });
     return ctx.reply(`Removed bot admin: ${id}`);
   });
 
@@ -141,6 +144,7 @@ export function settingsMiddleware() {
     const [, rule] = ctx.message.text.trim().split(/\s+/, 2);
     if (!RULE_KEYS.includes(rule)) return ctx.reply(`Unknown rule. Use one of: ${RULE_KEYS.join(', ')}`);
     await setGlobalRule(rule, true);
+    await logAction(ctx, { action: 'rule_global_enable', action_type: 'settings', chat: ctx.chat, violation: '-', content: `Enabled ${rule} globally` });
     return ctx.reply(`Enabled ${rule} globally.`);
   });
 
@@ -149,6 +153,7 @@ export function settingsMiddleware() {
     const [, rule] = ctx.message.text.trim().split(/\s+/, 2);
     if (!RULE_KEYS.includes(rule)) return ctx.reply(`Unknown rule. Use one of: ${RULE_KEYS.join(', ')}`);
     await setGlobalRule(rule, false);
+    await logAction(ctx, { action: 'rule_global_disable', action_type: 'settings', chat: ctx.chat, violation: '-', content: `Disabled ${rule} globally` });
     return ctx.reply(`Disabled ${rule} globally.`);
   });
 
@@ -160,6 +165,7 @@ export function settingsMiddleware() {
     const ok = (await isBotAdminOrOwner(ctx)) || (await isChatAdminWithBan(ctx, userId));
     if (!ok) return;
     await setChatRule(String(ctx.chat.id), rule, true);
+    await logAction(ctx, { action: 'rule_chat_enable', action_type: 'settings', chat: ctx.chat, violation: '-', content: `Enabled ${rule} for chat` });
     return ctx.reply(`Enabled ${rule} for this chat.`);
   });
 
@@ -170,6 +176,7 @@ export function settingsMiddleware() {
     const ok = (await isBotAdminOrOwner(ctx)) || (await isChatAdminWithBan(ctx, userId));
     if (!ok) return;
     await setChatRule(String(ctx.chat.id), rule, false);
+    await logAction(ctx, { action: 'rule_chat_disable', action_type: 'settings', chat: ctx.chat, violation: '-', content: `Disabled ${rule} for chat` });
     return ctx.reply(`Disabled ${rule} for this chat.`);
   });
 
@@ -196,6 +203,7 @@ export function settingsMiddleware() {
     const n = Number(ctx.message.text.trim().split(/\s+/, 2)[1]);
     if (!Number.isFinite(n)) return ctx.reply('Usage: /maxlen_global_set <number>');
     await setGlobalMaxLenLimit(n);
+    await logAction(ctx, { action: 'maxlen_global_set', action_type: 'settings', chat: ctx.chat, violation: '-', content: `Global max_len=${Math.trunc(n)}` });
     return ctx.reply(`Global max length limit set to ${Math.trunc(n)}.`);
   });
 
@@ -206,6 +214,7 @@ export function settingsMiddleware() {
     const n = Number(ctx.message.text.trim().split(/\s+/, 2)[1]);
     if (!Number.isFinite(n)) return ctx.reply('Usage: /maxlen_chat_set <number>');
     await setChatMaxLenLimit(String(ctx.chat.id), n);
+    await logAction(ctx, { action: 'maxlen_chat_set', action_type: 'settings', chat: ctx.chat, violation: '-', content: `Chat max_len=${Math.trunc(n)}` });
     return ctx.reply(`Chat max length limit set to ${Math.trunc(n)}.`);
   });
 
@@ -228,6 +237,7 @@ export function settingsMiddleware() {
       return ctx.reply('Bots cannot be whitelisted.');
     }
     await addChatWhitelistUser(String(ctx.chat.id), targetId);
+    await logAction(ctx, { action: 'whitelist_add', action_type: 'settings', user: replyFrom || { id: targetId }, chat: ctx.chat, violation: '-', content: `Whitelisted user ${targetId}` });
     return ctx.reply(`User ${targetId} added to whitelist for this chat.`);
   });
 
@@ -249,6 +259,7 @@ export function settingsMiddleware() {
       return ctx.reply('Bots cannot be whitelisted.');
     }
     await removeChatWhitelistUser(String(ctx.chat.id), targetId);
+    await logAction(ctx, { action: 'whitelist_remove', action_type: 'settings', user: replyFrom || { id: targetId }, chat: ctx.chat, violation: '-', content: `Removed user ${targetId} from whitelist` });
     return ctx.reply(`User ${targetId} removed from whitelist for this chat.`);
   });
 

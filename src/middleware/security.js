@@ -5,6 +5,7 @@ import {
   overCharLimit,
 } from '../filters.js';
 import { isRuleEnabled, getSettings, getEffectiveMaxLen, isUserWhitelisted } from '../store/settings.js';
+import { logAction } from '../logger.js';
 
 // Cache for user bio moderation status to reduce API calls
 // Map<userId, { hasLink: boolean, hasExplicit: boolean }>
@@ -143,12 +144,13 @@ export function securityMiddleware() {
       if (await isRuleEnabled('no_edit', ctx.chat.id)) {
         if (await ensureBotCanDelete(ctx)) {
           try {
-            await ctx.api.deleteMessage(ctx.chat.id, ctx.editedMessage.message_id);
-            await notifyAndCleanup(
-              ctx,
-              `${mentionHTML(ctx.from)} editing messages is not allowed. Your message was removed.`
-            );
-          } catch (_) {}
+          await ctx.api.deleteMessage(ctx.chat.id, ctx.editedMessage.message_id);
+          await notifyAndCleanup(
+            ctx,
+            `${mentionHTML(ctx.from)} editing messages is not allowed. Your message was removed.`
+          );
+          await logAction(ctx, { action: 'delete_message', action_type: 'moderation', violation: 'no_edit', user: ctx.from, chat: ctx.chat, content: ctx.editedMessage?.text || ctx.editedMessage?.caption || '' });
+        } catch (_) {}
         }
       }
       return; // do not continue other middlewares for edited messages
@@ -181,6 +183,7 @@ export function securityMiddleware() {
               ctx,
               `${mentionHTML(ctx.from)} your display name contains a link. Please remove links from your name to participate.`
             );
+            await logAction(ctx, { action: 'delete_message', action_type: 'moderation', violation: 'name_no_links', user: ctx.from, chat: ctx.chat, content: displayName });
           } catch (_) {}
         }
         return;
@@ -194,6 +197,7 @@ export function securityMiddleware() {
               ctx,
               `${mentionHTML(ctx.from)} your display name contains explicit content. Please change it to participate.`
             );
+            await logAction(ctx, { action: 'delete_message', action_type: 'moderation', violation: 'name_no_explicit', user: ctx.from, chat: ctx.chat, content: displayName });
           } catch (_) {}
         }
         return;
@@ -211,14 +215,15 @@ export function securityMiddleware() {
         if (bioHasLink || bioHasExplicit) {
         if (await ensureBotCanDelete(ctx)) {
           try {
-            await ctx.api.deleteMessage(ctx.chat.id, msg.message_id);
-            const reason = bioHasLink && bioHasExplicit
-              ? 'a link and explicit content'
-              : bioHasLink
-              ? 'a link'
-              : 'explicit content';
-            await notifyAndCleanup(ctx, `${mentionHTML(ctx.from)} cannot post because your bio contains ${reason}. Please update your bio to participate.`);
-          } catch (_) {}
+          await ctx.api.deleteMessage(ctx.chat.id, msg.message_id);
+          const reason = bioHasLink && bioHasExplicit
+            ? 'a link and explicit content'
+            : bioHasLink
+            ? 'a link'
+            : 'explicit content';
+          await notifyAndCleanup(ctx, `${mentionHTML(ctx.from)} cannot post because your bio contains ${reason}. Please update your bio to participate.`);
+          await logAction(ctx, { action: 'delete_message', action_type: 'moderation', violation: 'bio_block', user: ctx.from, chat: ctx.chat, content: text });
+        } catch (_) {}
         }
         return;
         }
@@ -236,6 +241,7 @@ export function securityMiddleware() {
             ctx,
             `${mentionHTML(ctx.from)} messages longer than ${limit} characters are not allowed.`
           );
+          await logAction(ctx, { action: 'delete_message', action_type: 'moderation', violation: 'max_len', user: ctx.from, chat: ctx.chat, content: text });
         } catch (_) {}
       }
       return;
@@ -249,6 +255,7 @@ export function securityMiddleware() {
         try {
           await ctx.api.deleteMessage(ctx.chat.id, msg.message_id);
           await notifyAndCleanup(ctx, `${mentionHTML(ctx.from)} links are not allowed in this group.`);
+          await logAction(ctx, { action: 'delete_message', action_type: 'moderation', violation: 'no_links', user: ctx.from, chat: ctx.chat, content: text });
         } catch (_) {}
       }
       return;
@@ -263,6 +270,7 @@ export function securityMiddleware() {
             ctx,
             `${mentionHTML(ctx.from)} explicit or sexual content is not allowed.`
           );
+          await logAction(ctx, { action: 'delete_message', action_type: 'moderation', violation: 'no_explicit', user: ctx.from, chat: ctx.chat, content: text });
         } catch (_) {}
       }
       return;
