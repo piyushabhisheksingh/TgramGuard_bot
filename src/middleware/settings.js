@@ -1,5 +1,5 @@
 import { Composer } from 'grammy';
-import { logAction } from '../logger.js';
+import { logAction, getBotStats, getGroupStats } from '../logger.js';
 import { RULE_KEYS, DEFAULT_RULES, DEFAULT_LIMITS } from '../rules.js';
 import {
   addBotAdmin,
@@ -85,6 +85,7 @@ export function settingsMiddleware() {
       '  /rule_global_enable <rule> — enable a rule globally',
       '  /rule_global_disable <rule> — disable a rule globally',
       '  /maxlen_global_set <n> — set global max length limit',
+      '  /bot_stats — show bot-wide moderation stats',
       'Group owner/admin (with ban rights), bot admin or owner:',
       '  /rule_chat_enable <rule> — enable a rule for this chat',
       '  /rule_chat_disable <rule> — disable a rule for this chat',
@@ -92,11 +93,56 @@ export function settingsMiddleware() {
       '  /whitelist_add <user_id> — or reply to a user to whitelist',
       '  /whitelist_remove <user_id> — or reply to a user to unwhitelist',
       '  /whitelist_list — show chat whitelist',
+      '  /group_stats — show this chat’s moderation stats',
       '  /rules_status — show global/chat/effective rule status',
       '',
       `Rules: ${RULE_KEYS.join(', ')}`,
     ].join('\n');
     return ctx.reply(msg);
+  });
+
+  // Bot-wide stats (owner or bot admin)
+  composer.command('bot_stats', async (ctx) => {
+    if (!(await isBotAdminOrOwner(ctx))) return;
+    const daily = await import('../logger.js').then(m => m.getBotStatsPeriod(1));
+    const weekly = await import('../logger.js').then(m => m.getBotStatsPeriod(7));
+    const lines = [
+      'Bot stats:',
+      `- today total: ${daily.total}`,
+      '- today by violation:',
+      ...Object.entries(daily.byViolation).map(([k, v]) => `  • ${k}: ${v}`),
+      '- today by action:',
+      ...Object.entries(daily.byAction).map(([k, v]) => `  • ${k}: ${v}`),
+      `- last 7 days total: ${weekly.total}`,
+      '- last 7 days by violation:',
+      ...Object.entries(weekly.byViolation).map(([k, v]) => `  • ${k}: ${v}`),
+      '- last 7 days by action:',
+      ...Object.entries(weekly.byAction).map(([k, v]) => `  • ${k}: ${v}`),
+    ];
+    return ctx.reply(lines.join('\n'));
+  });
+
+  // Per-chat stats (chat admin with ban rights, or bot admin/owner)
+  composer.command('group_stats', async (ctx) => {
+    const userId = ctx.from?.id;
+    const ok = (await isBotAdminOrOwner(ctx)) || (await isChatAdminWithBan(ctx, userId));
+    if (!ok) return;
+    const daily = await import('../logger.js').then(m => m.getGroupStatsPeriod(ctx.chat.id, 1));
+    const weekly = await import('../logger.js').then(m => m.getGroupStatsPeriod(ctx.chat.id, 7));
+    const lines = [
+      `Stats for chat ${ctx.chat.title || ctx.chat.id}:`,
+      `- today total: ${daily.total}`,
+      '- today by violation:',
+      ...Object.entries(daily.byViolation).map(([k, v]) => `  • ${k}: ${v}`),
+      '- today by action:',
+      ...Object.entries(daily.byAction).map(([k, v]) => `  • ${k}: ${v}`),
+      `- last 7 days total: ${weekly.total}`,
+      '- last 7 days by violation:',
+      ...Object.entries(weekly.byViolation).map(([k, v]) => `  • ${k}: ${v}`),
+      '- last 7 days by action:',
+      ...Object.entries(weekly.byAction).map(([k, v]) => `  • ${k}: ${v}`),
+    ];
+    return ctx.reply(lines.join('\n'));
   });
 
   // Admin management (owner only)

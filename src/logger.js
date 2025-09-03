@@ -2,6 +2,8 @@
 // Configure via env:
 // - LOG_CHAT_ID: Telegram chat ID (group/channel) where logs will be sent
 // - LOG_ENABLE: true/1/yes/on to enable (defaults to enabled if LOG_CHAT_ID present)
+// Stats persistence:
+// - If Supabase is configured, daily per-bot and per-chat counters are stored and used for daily/weekly stats.
 
 function boolFromEnv(v) {
   if (v == null) return false;
@@ -38,6 +40,170 @@ function formatChat(chat) {
   return `${title} [${id}]${link}`;
 }
 
+// --- In‑memory stats ---
+const stats = {
+  total: 0,
+  byViolation: Object.create(null),
+  byAction: Object.create(null),
+  perChat: new Map(), // chatId -> { total, byViolation: {}, byAction: {} }
+};
+
+function inc(mapObj, key, n = 1) {
+  if (!key) key = '-';
+  mapObj[key] = (mapObj[key] || 0) + n;
+}
+
+function getOrInitChatStats(chatId) {
+  const id = String(chatId);
+  let cs = stats.perChat.get(id);
+  if (!cs) {
+    cs = { total: 0, byViolation: Object.create(null), byAction: Object.create(null) };
+    stats.perChat.set(id, cs);
+  }
+  return cs;
+}
+
+export function getBotStats() {
+  return {
+    total: stats.total,
+    byViolation: { ...stats.byViolation },
+    byAction: { ...stats.byAction },
+  };
+}
+
+export function getGroupStats(chatId) {
+  const cs = getOrInitChatStats(chatId);
+  return {
+    chatId: String(chatId),
+    total: cs.total,
+    byViolation: { ...cs.byViolation },
+    byAction: { ...cs.byAction },
+  };
+}
+
+function recordStats(details, chat) {
+  const v = details.violation || '-';
+  const a = details.action || 'action';
+  stats.total += 1;
+  inc(stats.byViolation, v);
+  inc(stats.byAction, a);
+  if (chat?.id != null) {
+    const cs = getOrInitChatStats(chat.id);
+    cs.total += 1;
+    inc(cs.byViolation, v);
+    inc(cs.byAction, a);
+  }
+}
+
+// ---------- Supabase persistence for stats ----------
+import { getSupabase } from './store/supabase.js';
+
+function dayKey(d = new Date()) {
+  const y = d.getUTCFullYear();
+  const m = String(d.getUTCMonth() + 1).padStart(2, '0');
+  const dd = String(d.getUTCDate()).padStart(2, '0');
+  return `${y}-${m}-${dd}`; // YYYY-MM-DD (UTC)
+}
+
+function mergeCountersRow(row, incAction, incViolation) {
+  const out = {
+    total: (row?.total || 0) + 1,
+    by_violation: { ...(row?.by_violation || {}) },
+    by_action: { ...(row?.by_action || {}) },
+  };
+  out.by_violation[incViolation || '-'] = (out.by_violation[incViolation || '-'] || 0) + 1;
+  out.by_action[incAction || 'action'] = (out.by_action[incAction || 'action'] || 0) + 1;
+  return out;
+}
+
+async function sbUpsertGlobalDaily(dateStr, action, violation) {
+  const sb = getSupabase();
+  if (!sb) return;
+  const { data, error } = await sb
+    .from('stats_global_daily')
+    .select('day,total,by_violation,by_action')
+    .eq('day', dateStr)
+    .maybeSingle();
+  if (error && error.code !== 'PGRST116') return; // ignore
+  const merged = mergeCountersRow(data, action, violation);
+  await sb
+    .from('stats_global_daily')
+    .upsert({ day: dateStr, ...merged, updated_at: new Date().toISOString() }, { onConflict: 'day' });
+}
+
+async function sbUpsertChatDaily(chatId, dateStr, action, violation) {
+  const sb = getSupabase();
+  if (!sb) return;
+  const { data, error } = await sb
+    .from('stats_chat_daily')
+    .select('chat_id,day,total,by_violation,by_action')
+    .eq('chat_id', String(chatId))
+    .eq('day', dateStr)
+    .maybeSingle();
+  if (error && error.code !== 'PGRST116') return;
+  const merged = mergeCountersRow(data, action, violation);
+  await sb
+    .from('stats_chat_daily')
+    .upsert({ chat_id: String(chatId), day: dateStr, ...merged, updated_at: new Date().toISOString() }, { onConflict: 'chat_id,day' });
+}
+
+async function recordStatsSupabase(details, chat) {
+  const sb = getSupabase();
+  if (!sb) return;
+  const action = details.action || 'action';
+  const violation = details.violation || '-';
+  const today = dayKey(new Date());
+  try {
+    await sbUpsertGlobalDaily(today, action, violation);
+    if (chat?.id != null) {
+      await sbUpsertChatDaily(chat.id, today, action, violation);
+    }
+  } catch {
+    // ignore persistence errors
+  }
+}
+
+export async function getBotStatsPeriod(days = 1) {
+  const sb = getSupabase();
+  if (!sb) return getBotStats();
+  const since = new Date();
+  since.setUTCDate(since.getUTCDate() - (days - 1));
+  const sinceStr = dayKey(since);
+  const { data } = await sb
+    .from('stats_global_daily')
+    .select('day,total,by_violation,by_action')
+    .gte('day', sinceStr)
+    .order('day', { ascending: true });
+  const agg = { total: 0, byViolation: {}, byAction: {} };
+  for (const row of data || []) {
+    agg.total += row.total || 0;
+    for (const [k, v] of Object.entries(row.by_violation || {})) inc(agg.byViolation, k, v);
+    for (const [k, v] of Object.entries(row.by_action || {})) inc(agg.byAction, k, v);
+  }
+  return agg;
+}
+
+export async function getGroupStatsPeriod(chatId, days = 1) {
+  const sb = getSupabase();
+  if (!sb) return getGroupStats(chatId);
+  const since = new Date();
+  since.setUTCDate(since.getUTCDate() - (days - 1));
+  const sinceStr = dayKey(since);
+  const { data } = await sb
+    .from('stats_chat_daily')
+    .select('day,total,by_violation,by_action')
+    .eq('chat_id', String(chatId))
+    .gte('day', sinceStr)
+    .order('day', { ascending: true });
+  const agg = { total: 0, byViolation: {}, byAction: {} };
+  for (const row of data || []) {
+    agg.total += row.total || 0;
+    for (const [k, v] of Object.entries(row.by_violation || {})) inc(agg.byViolation, k, v);
+    for (const [k, v] of Object.entries(row.by_action || {})) inc(agg.byAction, k, v);
+  }
+  return agg;
+}
+
 export async function logAction(ctxOrApi, details = {}) {
   const LOG_CHAT_ID = process.env.LOG_CHAT_ID;
   if (!LOG_CHAT_ID) return; // disabled if not configured
@@ -70,8 +236,15 @@ export async function logAction(ctxOrApi, details = {}) {
   const html = lines.join('\n');
   try {
     const sent = await api.sendMessage(LOG_CHAT_ID, html, { parse_mode: 'HTML', disable_web_page_preview: true });
+    // Update in-memory stats after successful log
+    recordStats({ action, violation }, chat);
+    // Persist daily counters to Supabase (best-effort)
+    await recordStatsSupabase({ action, violation }, chat);
     return sent;
   } catch (_) {
+    // Even if sending fails, attempt to record stats locally
+    recordStats({ action, violation }, chat);
+    await recordStatsSupabase({ action, violation }, chat);
     return undefined;
   }
 }
