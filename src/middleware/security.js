@@ -38,6 +38,67 @@ function mentionHTML(user) {
   return `<a href="tg://user?id=${user.id}">${escapeHtml(name)}</a>`;
 }
 
+// Light-hearted Hinglish suffixes per violation type
+const FUNNY_SUFFIX = {
+  no_links: [
+    'Link mat chipkao, bhai! 😅',
+    'Yahan links allowed nahi, samjhe? 🙅‍♂️',
+    'Link ka mann hai? DM karo. 😉',
+    'Hyperlink ka scene nahi yahan. 🚫🔗',
+    'Link ki ladai ghar pe, yahan nahi. 😤',
+    'Link daalne ka fine: 100 push-ups. 💪',
+  ],
+  no_explicit: [
+    'Thoda sanskaari bano, yaar. 🙏',
+    'Gandi baatein ghar pe, please. 😜',
+    'PG-13 rakho, bro. 🎬',
+    'Family-friendly vibes only. 🧸',
+    'Itna tharki mat bano, champ. 😌',
+    'Internet ka chacha nahi banna. 🤓',
+  ],
+  bio_block: [
+    'Pehle bio sudharo, phir aao. 😌',
+    'Bio saaf rakho, dil saaf rakho. ✨',
+    'Bio mein sabak likho, link nahi. 📚',
+    'Bio ko detox do, zindagi ko relax. 🧘',
+  ],
+  max_len: [
+    'Short & sweet rakho. 😎',
+    'TL;DR mat bano, dost. 📏',
+    'Novel baad mein likhna, yahan nahi. 📖',
+    'Ek line ka pyaar bhi hota hai. 💬',
+  ],
+  no_edit: [
+    'Edit mat khelo, sahi bhejo. ✍️',
+    'Ek baar mein pyaar. 💌',
+    'Palti maarna band karo, hero. 🔄',
+    'Ctrl+Z ka nasha chhodo. 🧪',
+  ],
+  name_no_links: [
+    'Naam se link hatao, hero! 🏷️',
+    'Naam simple rakho, champ. 🫶',
+    'Username ko gym bhejo, link nahi. 🏋️‍♂️',
+    'Naam cool, link null. 😎',
+  ],
+  name_no_explicit: [
+    'Naam thoda seedha rakho. 🙂',
+    'Decent naam, decent fame. 🌟',
+    'Naam sanskaari = respect zyada. 🪷',
+    'Naam pe control, fame automatic. 🚀',
+  ],
+  default: [
+    'Shant raho, mast raho. 😌',
+    'Rules ka dhyaan rakho, yaaro. 📜',
+    'Mod ke saath pyaar se raho. 💙',
+    'Yeh group, tumhara ghar nahi. 🏠',
+  ],
+};
+
+function funnySuffix(violation = 'default') {
+  const list = FUNNY_SUFFIX[violation] || FUNNY_SUFFIX.default;
+  return ' ' + list[Math.floor(Math.random() * list.length)];
+}
+
 // Cache funny prefixes per (chat,user) for 10 minutes to avoid constant DB hits
 const funnyPrefixCache = new Map(); // key `${chatId}:${userId}` -> { until, prefix }
 async function userPrefix(ctx, user, currentViolation) {
@@ -173,7 +234,7 @@ export function securityMiddleware() {
           await ctx.api.deleteMessage(ctx.chat.id, ctx.editedMessage.message_id);
           await notifyAndCleanup(
             ctx,
-            `${await mentionWithPrefix(ctx, ctx.from, 'no_edit')} editing messages is not allowed. Your message was removed.`
+            `${await mentionWithPrefix(ctx, ctx.from, 'no_edit')} editing messages is not allowed. Your message was removed.${funnySuffix('no_edit')}`
           );
           await logAction(ctx, { action: 'delete_message', action_type: 'moderation', violation: 'no_edit', user: ctx.from, chat: ctx.chat, content: ctx.editedMessage?.text || ctx.editedMessage?.caption || '' });
         } catch (_) {}
@@ -207,7 +268,7 @@ export function securityMiddleware() {
             await ctx.api.deleteMessage(ctx.chat.id, msg.message_id);
             await notifyAndCleanup(
               ctx,
-              `${await mentionWithPrefix(ctx, ctx.from, 'name_no_links')} your display name contains a link. Please remove links from your name to participate.`
+              `${await mentionWithPrefix(ctx, ctx.from, 'name_no_links')} your display name contains a link. Please remove links from your name to participate.${funnySuffix('name_no_links')}`
             );
             await logAction(ctx, { action: 'delete_message', action_type: 'moderation', violation: 'name_no_links', user: ctx.from, chat: ctx.chat, content: displayName });
           } catch (_) {}
@@ -221,7 +282,7 @@ export function securityMiddleware() {
             await ctx.api.deleteMessage(ctx.chat.id, msg.message_id);
             await notifyAndCleanup(
               ctx,
-              `${await mentionWithPrefix(ctx, ctx.from, 'name_no_explicit')} your display name contains explicit content. Please change it to participate.`
+              `${await mentionWithPrefix(ctx, ctx.from, 'name_no_explicit')} your display name contains explicit content. Please change it to participate.${funnySuffix('name_no_explicit')}`
             );
             await logAction(ctx, { action: 'delete_message', action_type: 'moderation', violation: 'name_no_explicit', user: ctx.from, chat: ctx.chat, content: displayName });
           } catch (_) {}
@@ -247,7 +308,7 @@ export function securityMiddleware() {
             : bioHasLink
             ? 'a link'
             : 'explicit content';
-          await notifyAndCleanup(ctx, `${await mentionWithPrefix(ctx, ctx.from, 'bio_block')} cannot post because your bio contains ${reason}. Please update your bio to participate.`);
+          await notifyAndCleanup(ctx, `${await mentionWithPrefix(ctx, ctx.from, 'bio_block')} cannot post because your bio contains ${reason}. Please update your bio to participate.${funnySuffix('bio_block')}`);
           await logAction(ctx, { action: 'delete_message', action_type: 'moderation', violation: 'bio_block', user: ctx.from, chat: ctx.chat, content: bioText ? `[BIO] ${bioText}` : '' });
         } catch (_) {}
         }
@@ -265,7 +326,7 @@ export function securityMiddleware() {
           await ctx.api.deleteMessage(ctx.chat.id, msg.message_id);
           await notifyAndCleanup(
             ctx,
-            `${await mentionWithPrefix(ctx, ctx.from, 'max_len')} messages longer than ${limit} characters are not allowed.`
+            `${await mentionWithPrefix(ctx, ctx.from, 'max_len')} messages longer than ${limit} characters are not allowed.${funnySuffix('max_len')}`
           );
           await logAction(ctx, { action: 'delete_message', action_type: 'moderation', violation: 'max_len', user: ctx.from, chat: ctx.chat, content: text });
         } catch (_) {}
@@ -280,7 +341,7 @@ export function securityMiddleware() {
       if (await ensureBotCanDelete(ctx)) {
         try {
           await ctx.api.deleteMessage(ctx.chat.id, msg.message_id);
-          await notifyAndCleanup(ctx, `${await mentionWithPrefix(ctx, ctx.from, 'no_links')} links are not allowed in this group.`);
+          await notifyAndCleanup(ctx, `${await mentionWithPrefix(ctx, ctx.from, 'no_links')} links are not allowed in this group.${funnySuffix('no_links')}`);
           await logAction(ctx, { action: 'delete_message', action_type: 'moderation', violation: 'no_links', user: ctx.from, chat: ctx.chat, content: text });
         } catch (_) {}
       }
@@ -294,7 +355,7 @@ export function securityMiddleware() {
           await ctx.api.deleteMessage(ctx.chat.id, msg.message_id);
           await notifyAndCleanup(
             ctx,
-            `${await mentionWithPrefix(ctx, ctx.from, 'no_explicit')} explicit or sexual content is not allowed.`
+            `${await mentionWithPrefix(ctx, ctx.from, 'no_explicit')} explicit or sexual content is not allowed.${funnySuffix('no_explicit')}`
           );
           await logAction(ctx, { action: 'delete_message', action_type: 'moderation', violation: 'no_explicit', user: ctx.from, chat: ctx.chat, content: text });
         } catch (_) {}
