@@ -83,6 +83,8 @@ export const explicitTerms = [
   /\bm[a@]d[ae]r\s*ch[o0]d\b/i,
   /\bbehen\s*ch[o0]d\b/i,
   /\bbhen\s*ch[o0]d\b/i,
+  /\bbahen\s*ch[o0]+d+h?\b/i,           // bahen choodh/chodh variants
+  /(bhen|behen|bahen)\s*ch[o0]+d+h?\b/i, // captures bhen/behen/bahen choodh/chodh
   /\bbh[o0]sd[i1]\s*k[e3]\b/i,
   /\bbh[o0]s[a@]d[i1]k[e3]\b/i,
   /\bbh[o0]sr[i1]\s*w[ae]l[i1][ye]?\b/i,
@@ -92,6 +94,7 @@ export const explicitTerms = [
   /\bbh[o0]sd[a@]\b/i,
   /\bg[a@]a+nd\b/i,
   /\bg[a@]a+ndu\b/i,
+  /\bg[a@]ndu\b/i,
   /\bch[o0]d[uú]\b/i,
   /\bl[uµ]nd\b/i,
   /\bl[ao0]ud[ae]\b/i,
@@ -121,12 +124,15 @@ export const explicitTerms = [
   // Hinglish phrase slangs
   /(bhen|behen|bahen)\s*ki\s*ch[uµo0]{1,2}t{1,2}\b/i,
   /(bhen|behen|bahen)\s*ke\s*pakod(e|ey|e)?\b/i,
+  /(bur|boor|b[uú]r)\s*ke\s*b[a@]a+l\b/i,           // bur ke baal
   /(maa|ma|ammi|mummy)\s*ki\s*ch[uµo0]{1,2}t{1,2}\b/i,
   /(maa|ma|ammi|mummy)\s*ke?\s*l[o0]d(e|a)?\b/i,
   /(bhen|behen|bahen)\s*ke?\s*l[o0]d(e|a)?\b/i,
   /(bhabhi|bhabi|bhabhiji)\s*ke?\s*(n[uµ]d[e3]s?|b[o0]{2}bs?|t[i1]ts|ch[uµo0]{1,2}t{1,2})\b/i,
   /r[a@]nd[i1y]\s*ke?\s*(b[ea]cch[eaiy]|bache|bacha)\b/i,
   /(g[a@]a?nd|gaand)\s*m[e3]?\s*(lund|l[ao0]d[ae]|dand[ae])\b/i,
+  /(suar|soo?ar|suwar|sooar|kutt[e3]?|kutte|gadhe?|gadha|ullu)\s*ki\s*jh?a+a?nt?\b/i,
+  /(g[a@]a?nd|gand)\s*m[e3]?\s*k[e3]?e?d[ae]\b/i,
   /ch[uµo0]{1,2}t\s*m[e3]?\s*(m[a@]r(n[ae]|w[ae]|v[ao])|f[a@]d[eo]?)\b/i,
   /(lund|l[ao0]d[ae])\s*ch(us|oos)[a-z]*\b/i,
   /(teri|tera|tumhari)\s*(maa|ma|ammi|mummy)\s*ki\s*ch[uµo0]{1,2}t{1,2}\b/i,
@@ -140,6 +146,8 @@ export const explicitTerms = [
   /(माँ|मां|अम्मी|मम्मी)\s*की\s*चूत/u,
   /बहन\s*के\s*(लौड़ा|लौड़े)/u,
   /(गांड|गांड़)\s*में\s*(लंड|लौड़ा|डंडा)/u,
+  /(सुअर|कुत्ते|कुत्ता|गधे|गधा|उल्लू)\s*की\s*(झांट|झाट)/u,
+  /(गांड|गांड़|गंड)\s*में\s*कीड़[ाअे]?/u,
   /चूत\s*में\s*मार(ना|ो|ती|ते|ता)/u,
   /रंडी\s*के\s*(बच्चे|बच्चा)/u,
   /(तेरी|तेरा|तुम्हारी)\s*(माँ|मां)\s*की\s*चूत/u,
