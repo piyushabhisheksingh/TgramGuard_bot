@@ -269,6 +269,7 @@ export function settingsMiddleware() {
       // Default (all users) concise commands
       await ctx.api.setMyCommands(
         [
+          { command: 'help', description: 'Show help and commands' },
           { command: 'ping', description: 'Check bot availability' },
           { command: 'settings', description: 'Show settings help' },
           { command: 'rules_status', description: 'Show rules status' },
