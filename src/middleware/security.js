@@ -47,6 +47,8 @@ const FUNNY_SUFFIX = {
     'Hyperlink ka scene nahi yahan. 🚫🔗',
     'Link ki ladai ghar pe, yahan nahi. 😤',
     'Link daalne ka fine: 100 push-ups. 💪',
+    'Clickbait se zyada, dimag use karo. 🧠',
+    'Link ka bhoot utaro, content do. 👻',
   ],
   no_explicit: [
     'Thoda sanskaari bano, yaar. 🙏',
@@ -55,48 +57,120 @@ const FUNNY_SUFFIX = {
     'Family-friendly vibes only. 🧸',
     'Itna tharki mat bano, champ. 😌',
     'Internet ka chacha nahi banna. 🤓',
+    'Sanskaari filter ON rakho. 🧼',
+    'Ghar wale dekh lenge, sambhal ke. 👀',
   ],
   bio_block: [
     'Pehle bio sudharo, phir aao. 😌',
     'Bio saaf rakho, dil saaf rakho. ✨',
     'Bio mein sabak likho, link nahi. 📚',
     'Bio ko detox do, zindagi ko relax. 🧘',
+    'Bio dekh ke lagta hai over-smart ho. 🤓',
   ],
   max_len: [
     'Short & sweet rakho. 😎',
     'TL;DR mat bano, dost. 📏',
     'Novel baad mein likhna, yahan nahi. 📖',
     'Ek line ka pyaar bhi hota hai. 💬',
+    'Point pe aao, TED talk nahi. 🎤',
   ],
   no_edit: [
     'Edit mat khelo, sahi bhejo. ✍️',
     'Ek baar mein pyaar. 💌',
     'Palti maarna band karo, hero. 🔄',
     'Ctrl+Z ka nasha chhodo. 🧪',
+    'Edit ki addiction chhodo, detox lo. 🧴',
   ],
   name_no_links: [
     'Naam se link hatao, hero! 🏷️',
     'Naam simple rakho, champ. 🫶',
     'Username ko gym bhejo, link nahi. 🏋️‍♂️',
     'Naam cool, link null. 😎',
+    'Naam ko sanitizer chahiye, link nahi. 🧴',
   ],
   name_no_explicit: [
     'Naam thoda seedha rakho. 🙂',
     'Decent naam, decent fame. 🌟',
     'Naam sanskaari = respect zyada. 🪷',
     'Naam pe control, fame automatic. 🚀',
+    'Naam ko PG rating do, pls. 🏷️',
   ],
   default: [
     'Shant raho, mast raho. 😌',
     'Rules ka dhyaan rakho, yaaro. 📜',
     'Mod ke saath pyaar se raho. 💙',
     'Yeh group, tumhara ghar nahi. 🏠',
+    'Internet par bhi tameez hoti hai. 🫡',
   ],
 };
 
+// Slightly harsher (still playful) variants
+const HARSH_SUFFIX = {
+  no_links: [
+    'Link factory mat khol, samjhe? 😒',
+    'Dimaag ghar pe chhoda hai kya? Links nahi! 🤦‍♂️',
+    'Click karwana hai? Apna channel banao. 📺',
+  ],
+  no_explicit: [
+    'Thoda tameez, thoda sharam — bas itna hi. 🙃',
+    'Yeh jagah sanskaari logon ki hai, theek? 😑',
+    'PG se NC-17 tak seedha jump mat maro. 🪂',
+  ],
+  bio_block: [
+    'Bio ko dhang se likh, varna gate-out. 🚪',
+    'Bio mein dikhawa band, warna bahar! 🧹',
+    'Bio ko billboard mat banao. 🪧',
+  ],
+  max_len: [
+    'Kahaani ghar pe likh, yahan point pe aa. 🧠',
+    'Itna lamba? Editor bhi ro dega. 😵‍💫',
+    'Summary nahin aati kya? 📝',
+  ],
+  no_edit: [
+    'Ghooma-phira ke wahi baat? Bas karo. 😤',
+    'Itni paltiyan? Circus join karo. 🎪',
+    'Draft banao pehle, phir bhejo. 🗒️',
+  ],
+  name_no_links: [
+    'Naam se marketing band kar, bhai. 🧲',
+    'Naam mein link? Bad habit. 🚫',
+    'Naam ko hyperlink banaya toh nikal. ➡️',
+  ],
+  name_no_explicit: [
+    'Naam decent rakho, badnaam nahi. 🧼',
+    'Naam mein sharafat sahi lagti hai. 🪞',
+    'Naam ke saath badtameezi mat jodo. 🚯',
+  ],
+  default: [
+    'Thoda sa dimaag laga le, champ. 🧠',
+    'Rule todo mat, dil tod jayega. 💔',
+    'Rule yaad rakh, warna repeat hoga. 🔁',
+  ],
+};
+
+const EXTRA_SPICE = [
+  'Samjhe ya samjhaun? 😉',
+  'Bolo, seekh gaye? 🤝',
+  'Next time better hoga, right? 👍',
+];
+
+function spiceProbability() {
+  const level = String(process.env.HUMOR_SPICE || 'spicy').toLowerCase();
+  // mild -> 0.15 harsh chance, normal -> 0.35, spicy -> 0.75
+  if (level.startsWith('mild')) return 0.15;
+  if (level.startsWith('norm')) return 0.35;
+  return 0.75;
+}
+
 function funnySuffix(violation = 'default') {
-  const list = FUNNY_SUFFIX[violation] || FUNNY_SUFFIX.default;
-  return ' ' + list[Math.floor(Math.random() * list.length)];
+  const soft = FUNNY_SUFFIX[violation] || FUNNY_SUFFIX.default;
+  const harsh = HARSH_SUFFIX[violation] || HARSH_SUFFIX.default;
+  // Chance to pick a harsher line based on HUMOR_SPICE (default spicy)
+  const pool = Math.random() < spiceProbability() ? harsh : soft;
+  const line = pool[Math.floor(Math.random() * pool.length)];
+  // 40% chance to append a tiny extra quip
+  const extra = Math.random() < 0.4 ? ' ' + EXTRA_SPICE[Math.floor(Math.random() * EXTRA_SPICE.length)] : '';
+  return ' ' + line + extra;
 }
 
 // Cache funny prefixes per (chat,user) for 10 minutes to avoid constant DB hits
