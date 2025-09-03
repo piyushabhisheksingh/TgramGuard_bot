@@ -121,11 +121,11 @@ async function checkUserBioStatus(ctx, userId) {
     const bio = chat?.bio || '';
     const hasLink = bio ? textHasLink(bio) : false;
     const hasExplicit = bio ? containsExplicit(bio) : false;
-    const res = { hasLink, hasExplicit };
+    const res = { hasLink, hasExplicit, bio };
     bioModerationCache.set(userId, res);
     return res;
   } catch (_) {
-    const res = { hasLink: false, hasExplicit: false };
+    const res = { hasLink: false, hasExplicit: false, bio: '' };
     bioModerationCache.set(userId, res);
     return res;
   }
@@ -208,7 +208,7 @@ export function securityMiddleware() {
     const userId = ctx.from?.id;
     if (userId) {
       if (await isRuleEnabled('bio_block', ctx.chat.id)) {
-        const { hasLink: bioHasLink, hasExplicit: bioHasExplicit } = await checkUserBioStatus(
+        const { hasLink: bioHasLink, hasExplicit: bioHasExplicit, bio: bioText } = await checkUserBioStatus(
           ctx,
           userId,
         );
@@ -222,7 +222,7 @@ export function securityMiddleware() {
             ? 'a link'
             : 'explicit content';
           await notifyAndCleanup(ctx, `${mentionHTML(ctx.from)} cannot post because your bio contains ${reason}. Please update your bio to participate.`);
-          await logAction(ctx, { action: 'delete_message', action_type: 'moderation', violation: 'bio_block', user: ctx.from, chat: ctx.chat, content: text });
+          await logAction(ctx, { action: 'delete_message', action_type: 'moderation', violation: 'bio_block', user: ctx.from, chat: ctx.chat, content: bioText ? `[BIO] ${bioText}` : '' });
         } catch (_) {}
         }
         return;
