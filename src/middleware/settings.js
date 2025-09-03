@@ -551,10 +551,14 @@ export function settingsMiddleware() {
       // Default (all users) concise commands
       await ctx.api.setMyCommands(
         [
+          { command: 'start', description: 'Add bot to a group' },
           { command: 'help', description: 'Show help and commands' },
           { command: 'ping', description: 'Check bot availability' },
           { command: 'settings', description: 'Show settings help' },
           { command: 'rules_status', description: 'Show rules status' },
+          { command: 'group_stats', description: 'Show this chat\'s stats' },
+          { command: 'user_stats', description: 'Show your stats (or reply/id)' },
+          { command: 'user_stats_global', description: 'Show your global stats' },
         ],
         { scope: { type: 'default' } }
       );
@@ -563,6 +567,7 @@ export function settingsMiddleware() {
       await ctx.api.setMyCommands(
         [
           { command: 'rules_status', description: 'Show rules status' },
+          { command: 'group_stats', description: 'Show this chat\'s stats' },
           { command: 'rule_chat_enable', description: 'Enable a rule in this chat' },
           { command: 'rule_chat_disable', description: 'Disable a rule in this chat' },
           { command: 'maxlen_chat_set', description: 'Set max message length for chat' },
@@ -573,17 +578,19 @@ export function settingsMiddleware() {
         { scope: { type: 'all_chat_administrators' } }
       );
 
-      // Owner-level commands (optional): keep minimal to avoid clutter
-      // Uncomment to expose owner tools globally
+      // Owner-level commands (optional): set for all private chats to reduce clutter in groups
       await ctx.api.setMyCommands(
         [
+          { command: 'bot_stats', description: 'Show bot-wide stats' },
           { command: 'botadmin_add', description: 'Add a bot admin (owner only)' },
           { command: 'botadmin_remove', description: 'Remove a bot admin' },
           { command: 'rule_global_enable', description: 'Enable a rule globally' },
           { command: 'rule_global_disable', description: 'Disable a rule globally' },
           { command: 'maxlen_global_set', description: 'Set global max length' },
+          { command: 'set_mycommands', description: 'Publish command menus' },
+          { command: 'remove_mycommands', description: 'Clear command menus' },
         ],
-        { scope: { type: 'default' } }
+        { scope: { type: 'all_private_chats' } }
       );
 
       return ctx.reply('Bot commands have been set.');

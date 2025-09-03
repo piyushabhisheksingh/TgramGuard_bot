@@ -45,6 +45,33 @@ bot.use(settingsMiddleware());
 // Optional: simple liveness command
 bot.command('ping', (ctx) => ctx.reply('pong'));
 
+// DM onboarding: /start shows add-to-group link and basics
+bot.command('start', async (ctx) => {
+  const chatType = ctx.chat?.type;
+  const username = ctx.me?.username;
+  const addUrl = username ? `https://t.me/${username}?startgroup=true` : undefined;
+  if (chatType === 'private') {
+    const lines = [
+      'Namaste! I can help secure your groups:',
+      '- Block links and explicit content',
+      '- Enforce no-edits and max message length',
+      '- Bio/content checks + whitelist',
+      '',
+      'Add me to a group and make me admin (Delete messages; optionally Ban users).',
+    ];
+    return ctx.reply(lines.join('\n'), {
+      reply_markup: addUrl
+        ? {
+            inline_keyboard: [[{ text: '➕ Add me to your group', url: addUrl }], [{ text: 'ℹ️ Help / Settings', callback_data: 'noop' }]],
+          }
+        : undefined,
+      disable_web_page_preview: true,
+    });
+  }
+  // In groups: short intro
+  return ctx.reply('Hello! I am active here. Use /settings for commands.');
+});
+
 // Log when bot is added to a new group and pin the log message
 bot.on('my_chat_member', async (ctx) => {
   try {
