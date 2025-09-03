@@ -48,7 +48,7 @@ npm start
 
 Notes:
 - Telegram may not always expose user bios to bots; if not accessible, the bot assumes no bio link (best effort).
-- All notices are auto-deleted after a few seconds to avoid clutter.
+- Moderation notices can auto-delete after a few seconds to avoid clutter; this is configurable via env (see below).
 
 ## Commands
 
@@ -92,10 +92,17 @@ Limits
 - `PORT`: port for the minimal HTTP server (default 3000)
 - `BOT_OWNER_ID`: Telegram user ID of the bot owner (exempt from moderation)
 - `BOT_ADMIN_IDS`: comma or space-separated Telegram user IDs of bot admins (exempt)
+- `NOTIFY_CLEANUP`: when `true`/`1`/`yes`/`on`, auto-deletes moderation notices after a delay; otherwise messages persist (default off)
+- `NOTIFY_CLEANUP_SECONDS`: delay in seconds before deleting notices (defaults to 8 if cleanup is enabled)
+
+Optional Supabase (for shared/multi-instance persistence):
+- `SUPABASE_URL`: Supabase project URL
+- `SUPABASE_KEY`: Supabase service role (recommended) or an auth/anon key with policies that allow read/write
 
 ### Persistence
 
-- Bot settings are stored in `data/settings.json`. It is created automatically on first run.
+- By default, bot settings are stored in `data/settings.json` (auto-created).
+- If `SUPABASE_URL` and `SUPABASE_KEY` are set, global settings are stored in table `bot_settings` and per-chat settings in `chat_settings`.
 
 ## Troubleshooting
 

@@ -41,24 +41,36 @@ async function notifyAndCleanup(ctx, text, seconds = 8) {
   const chatId = ctx.chat?.id;
   if (!chatId) return;
   const replyTo = ctx.msg?.message_id;
+  const boolFromEnv = (v) => {
+    if (v == null) return false;
+    const s = String(v).toLowerCase();
+    return s === '1' || s === 'true' || s === 'yes' || s === 'on';
+  };
+  const doCleanup = boolFromEnv(process.env.NOTIFY_CLEANUP);
+  const cleanupSeconds = Number(process.env.NOTIFY_CLEANUP_SECONDS || seconds);
+  const delayMs = Number.isFinite(cleanupSeconds) ? Math.max(1, cleanupSeconds) * 1000 : seconds * 1000;
   try {
     const sent = await ctx.api.sendMessage(chatId, text, {
       reply_to_message_id: replyTo,
       parse_mode: 'HTML',
       disable_web_page_preview: true,
     });
-    setTimeout(() => {
-      ctx.api.deleteMessage(chatId, sent.message_id).catch(() => {});
-    }, seconds * 1000);
+    if (doCleanup) {
+      setTimeout(() => {
+        ctx.api.deleteMessage(chatId, sent.message_id).catch(() => {});
+      }, delayMs);
+    }
   } catch (_) {
     try {
       const sent = await ctx.api.sendMessage(chatId, text, {
         parse_mode: 'HTML',
         disable_web_page_preview: true,
       });
-      setTimeout(() => {
-        ctx.api.deleteMessage(chatId, sent.message_id).catch(() => {});
-      }, seconds * 1000);
+      if (doCleanup) {
+        setTimeout(() => {
+          ctx.api.deleteMessage(chatId, sent.message_id).catch(() => {});
+        }, delayMs);
+      }
     } catch (_) {}
   }
 }
