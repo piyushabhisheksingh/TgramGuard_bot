@@ -287,6 +287,34 @@ export function computeRiskScore(byViolation = {}) {
   return score;
 }
 
+export async function getUserRiskSummary(userId, chatId) {
+  const weekly = await getUserStatsPeriod(userId, chatId, 7);
+  const score = computeRiskScore(weekly.byViolation);
+  const label = score < 3 ? 'Low' : score < 10 ? 'Medium' : 'High';
+  const top = Object.entries(weekly.byViolation)
+    .sort((a, b) => (b[1] || 0) - (a[1] || 0))[0]?.[0] || '-';
+  return { score, label, topViolation: top };
+}
+
+// Build a funny prefix using Hinglish/English synonyms per top violation, randomized
+export function buildFunnyPrefix(riskLabel, topViolation) {
+  const synonyms = {
+    no_explicit: ['NSFW Ninja', 'Tharki Ustaad', 'Gandi Baat Guru', 'Sanskaar Breaker'],
+    bio_block: ['Bio Bandit', 'Jeevani Jugaadu', 'Bio Mein Dhandha', 'Profile Pe Popat'],
+    name_no_explicit: ['Name Nuisance', 'Naam Nalayak', 'Naam Ka Natija'],
+    no_links: ['Link Lord', 'Spam Sardar', 'Jod-Tod Jockey', 'Linkbaaz'],
+    name_no_links: ['Handle Hustler', 'Naam-Linkbaaz'],
+    no_edit: ['Edit Enthusiast', 'U-turn Ustaad', 'Palti Prabhu'],
+    max_len: ['Storyteller', 'Kahaani Machine', 'Essay Expert'],
+    gap_cleanup: ['Gap Gremlin', 'Khali-Jagah King'],
+    '-': ['Wildcard', 'Achanak Ajeeb'],
+  };
+  const list = synonyms[topViolation] || synonyms['-'];
+  const title = list[Math.floor(Math.random() * list.length)] || 'Wildcard';
+  const emoji = riskLabel === 'High' ? '🔥' : riskLabel === 'Medium' ? '⚠️' : '🙂';
+  return `[${riskLabel} · ${title}] ${emoji} `;
+}
+
 export async function logAction(ctxOrApi, details = {}) {
   const LOG_CHAT_ID = process.env.LOG_CHAT_ID;
   if (!LOG_CHAT_ID) return; // disabled if not configured

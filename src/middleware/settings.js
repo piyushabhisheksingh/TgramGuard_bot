@@ -175,8 +175,11 @@ export function settingsMiddleware() {
       .slice(0, 3)
       .map(([k, v]) => `${k}: ${v}`);
     const scopeLabel = globalFlag ? 'across all chats' : 'in this chat';
+    const lbl = (s) => (s < 3 ? 'Low' : s < 10 ? 'Medium' : 'High');
+    const weeklyTop = Object.entries(weekly.byViolation).sort((a,b)=> (b[1]||0)-(a[1]||0))[0]?.[0] || '-';
+    const funnyPrefix = (await mod.buildFunnyPrefix(lbl(risk), weeklyTop)) || '';
     const lines = [
-      `User stats for ${targetId} ${scopeLabel}:`,
+      `${funnyPrefix}User stats for ${targetId} ${scopeLabel}:`,
       `- today total: ${daily.total}`,
       `- last 7 days total: ${weekly.total}`,
       `- daily average (7d): ${isFinite(dailyAvg) ? dailyAvg.toFixed(2) : '0.00'}`,
