@@ -86,6 +86,85 @@ export function settingsMiddleware() {
       .map(([k, v]) => `• <code>${esc(k)}</code>: <b>${v}</b>`) // bullet lines
       .join('\n');
 
+  // -------- Bot/Group stats builders & keyboards --------
+  function botStatsKeyboard(format) {
+    return {
+      inline_keyboard: [[
+        { text: `Format: ${format === 'pretty' ? 'Pretty ✅' : 'Pretty'}`, callback_data: `bstats:pretty` },
+        { text: `Format: ${format === 'compact' ? 'Compact ✅' : 'Compact'}`, callback_data: `bstats:compact` },
+      ]],
+    };
+  }
+
+  async function buildBotStatsMessage(format = 'pretty') {
+    const mod = await import('../logger.js');
+    const daily = await mod.getBotStatsPeriod(1);
+    const weekly = await mod.getBotStatsPeriod(7);
+    if (format === 'compact') {
+      const topV = Object.entries(weekly.byViolation).sort((a,b)=> (b[1]||0)-(a[1]||0)).slice(0,3)
+        .map(([k,v])=> `${esc(k)}=${v}`).join(', ');
+      const topA = Object.entries(weekly.byAction).sort((a,b)=> (b[1]||0)-(a[1]||0)).slice(0,2)
+        .map(([k,v])=> `${esc(k)}=${v}`).join(', ');
+      return [
+        '<b>📊 Bot</b>',
+        `today: <b>${daily.total}</b>`,
+        `7d: <b>${weekly.total}</b>`,
+        topV ? `topV(7d): <code>${topV}</code>` : '',
+        topA ? `topA(7d): <code>${topA}</code>` : '',
+      ].filter(Boolean).join(' | ');
+    }
+    const html = [
+      `<b>📊 Bot Stats</b>`,
+      '',
+      `<b>🗓 Today</b> — Total: <b>${daily.total}</b>`,
+      formatKV(daily.byViolation) ? `• <i>By violation</i>\n${formatKV(daily.byViolation)}` : '',
+      formatKV(daily.byAction) ? `• <i>By action</i>\n${formatKV(daily.byAction)}` : '',
+      '',
+      `<b>🗓 Last 7 Days</b> — Total: <b>${weekly.total}</b>`,
+      formatKV(weekly.byViolation) ? `• <i>By violation</i>\n${formatKV(weekly.byViolation)}` : '',
+      formatKV(weekly.byAction) ? `• <i>By action</i>\n${formatKV(weekly.byAction)}` : '',
+    ].filter(Boolean).join('\n');
+    return html;
+  }
+
+  function groupStatsKeyboard(format) {
+    return {
+      inline_keyboard: [[
+        { text: `Format: ${format === 'pretty' ? 'Pretty ✅' : 'Pretty'}`, callback_data: `gstats:pretty` },
+        { text: `Format: ${format === 'compact' ? 'Compact ✅' : 'Compact'}`, callback_data: `gstats:compact` },
+      ]],
+    };
+  }
+
+  async function buildGroupStatsMessage(ctx, format = 'pretty') {
+    const mod = await import('../logger.js');
+    const daily = await mod.getGroupStatsPeriod(ctx.chat.id, 1);
+    const weekly = await mod.getGroupStatsPeriod(ctx.chat.id, 7);
+    const title = esc(ctx.chat.title || ctx.chat.id);
+    if (format === 'compact') {
+      const topV = Object.entries(weekly.byViolation).sort((a,b)=> (b[1]||0)-(a[1]||0)).slice(0,3)
+        .map(([k,v])=> `${esc(k)}=${v}`).join(', ');
+      return [
+        `👥 <b>${title}</b>`,
+        `today: <b>${daily.total}</b>`,
+        `7d: <b>${weekly.total}</b>`,
+        topV ? `topV(7d): <code>${topV}</code>` : '',
+      ].filter(Boolean).join(' | ');
+    }
+    const html = [
+      `<b>👥 Group Stats</b> — ${title}`,
+      '',
+      `<b>🗓 Today</b> — Total: <b>${daily.total}</b>`,
+      formatKV(daily.byViolation) ? `• <i>By violation</i>\n${formatKV(daily.byViolation)}` : '',
+      formatKV(daily.byAction) ? `• <i>By action</i>\n${formatKV(daily.byAction)}` : '',
+      '',
+      `<b>🗓 Last 7 Days</b> — Total: <b>${weekly.total}</b>`,
+      formatKV(weekly.byViolation) ? `• <i>By violation</i>\n${formatKV(weekly.byViolation)}` : '',
+      formatKV(weekly.byAction) ? `• <i>By action</i>\n${formatKV(weekly.byAction)}` : '',
+    ].filter(Boolean).join('\n');
+    return html;
+  }
+
   async function fetchUserStats(targetId, chatIdOrNull) {
     const mod = await import('../logger.js');
     const daily = await mod.getUserStatsPeriod(targetId, chatIdOrNull, 1);
@@ -189,22 +268,10 @@ export function settingsMiddleware() {
   // Bot-wide stats (owner or bot admin)
   composer.command('bot_stats', async (ctx) => {
     if (!(await isBotAdminOrOwner(ctx))) return;
-    const daily = await import('../logger.js').then(m => m.getBotStatsPeriod(1));
-    const weekly = await import('../logger.js').then(m => m.getBotStatsPeriod(7));
-    const html = [
-      `<b>📊 Bot Stats</b>`,
-      '',
-      `<b>🗓 Today</b> — Total: <b>${daily.total}</b>`,
-      formatKV(daily.byViolation) ? `• <i>By violation</i>\n${formatKV(daily.byViolation)}` : '',
-      formatKV(daily.byAction) ? `• <i>By action</i>\n${formatKV(daily.byAction)}` : '',
-      '',
-      `<b>🗓 Last 7 Days</b> — Total: <b>${weekly.total}</b>`,
-      formatKV(weekly.byViolation) ? `• <i>By violation</i>\n${formatKV(weekly.byViolation)}` : '',
-      formatKV(weekly.byAction) ? `• <i>By action</i>\n${formatKV(weekly.byAction)}` : '',
-    ]
-      .filter(Boolean)
-      .join('\n');
-    return ctx.reply(html, { parse_mode: 'HTML', disable_web_page_preview: true });
+    const tokens = ctx.message.text.trim().split(/\s+/);
+    const format = tokens.includes('compact') ? 'compact' : 'pretty';
+    const html = await buildBotStatsMessage(format);
+    return ctx.reply(html, { parse_mode: 'HTML', disable_web_page_preview: true, reply_markup: botStatsKeyboard(format) });
   });
 
   // Per-chat stats (chat admin with ban rights, or bot admin/owner)
@@ -212,23 +279,33 @@ export function settingsMiddleware() {
     const userId = ctx.from?.id;
     const ok = (await isBotAdminOrOwner(ctx)) || (await isChatAdminWithBan(ctx, userId));
     if (!ok) return;
-    const daily = await import('../logger.js').then(m => m.getGroupStatsPeriod(ctx.chat.id, 1));
-    const weekly = await import('../logger.js').then(m => m.getGroupStatsPeriod(ctx.chat.id, 7));
-    const title = esc(ctx.chat.title || ctx.chat.id);
-    const html = [
-      `<b>👥 Group Stats</b> — ${title}`,
-      '',
-      `<b>🗓 Today</b> — Total: <b>${daily.total}</b>`,
-      formatKV(daily.byViolation) ? `• <i>By violation</i>\n${formatKV(daily.byViolation)}` : '',
-      formatKV(daily.byAction) ? `• <i>By action</i>\n${formatKV(daily.byAction)}` : '',
-      '',
-      `<b>🗓 Last 7 Days</b> — Total: <b>${weekly.total}</b>`,
-      formatKV(weekly.byViolation) ? `• <i>By violation</i>\n${formatKV(weekly.byViolation)}` : '',
-      formatKV(weekly.byAction) ? `• <i>By action</i>\n${formatKV(weekly.byAction)}` : '',
-    ]
-      .filter(Boolean)
-      .join('\n');
-    return ctx.reply(html, { parse_mode: 'HTML', disable_web_page_preview: true });
+    const tokens = ctx.message.text.trim().split(/\s+/);
+    const format = tokens.includes('compact') ? 'compact' : 'pretty';
+    const html = await buildGroupStatsMessage(ctx, format);
+    return ctx.reply(html, { parse_mode: 'HTML', disable_web_page_preview: true, reply_markup: groupStatsKeyboard(format) });
+  });
+
+  // Toggle handlers for bot/group stats
+  composer.callbackQuery(/^bstats:(pretty|compact)$/i, async (ctx) => {
+    const [, format] = ctx.match;
+    const html = await buildBotStatsMessage(format);
+    try {
+      await ctx.editMessageText(html, { parse_mode: 'HTML', disable_web_page_preview: true, reply_markup: botStatsKeyboard(format) });
+    } catch (_) {
+      await ctx.reply(html, { parse_mode: 'HTML', disable_web_page_preview: true, reply_markup: botStatsKeyboard(format) });
+    }
+    return ctx.answerCallbackQuery();
+  });
+
+  composer.callbackQuery(/^gstats:(pretty|compact)$/i, async (ctx) => {
+    const [, format] = ctx.match;
+    const html = await buildGroupStatsMessage(ctx, format);
+    try {
+      await ctx.editMessageText(html, { parse_mode: 'HTML', disable_web_page_preview: true, reply_markup: groupStatsKeyboard(format) });
+    } catch (_) {
+      await ctx.reply(html, { parse_mode: 'HTML', disable_web_page_preview: true, reply_markup: groupStatsKeyboard(format) });
+    }
+    return ctx.answerCallbackQuery();
   });
 
   // User stats (per-chat, with optional "global" flag). Anyone can view.
