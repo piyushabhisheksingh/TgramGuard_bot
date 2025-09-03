@@ -4,6 +4,7 @@
 // - Detects general URLs, telegram links, and invite patterns
 export const urlRegex = /(?:https?:\/\/|www\.|t\.me\/|telegram\.me\/|tg:\/\/join|t\.me\/[+@]|t\.me\/joinchat|\b[a-z0-9-]+\.[a-z]{2,})(\/\S*)?/i;
 import { explicitTerms } from './filters/explicitTerms.js';
+import { customSafePatternsNormalized } from './filters/customTerms.js';
 
 export function textHasLink(text = "") {
   if (!text) return false;
@@ -102,6 +103,8 @@ const safePatternsNormalized = [
   // Romanized Hindi for "leave it" to avoid conflict with explicit "chod"
   /chh?odo/gi,         // chhodo / chodo
   /chh?oddo/gi,        // chhoddo / choddo
+  // Add your own safe words via data/safe_terms_custom.{txt,json}
+  ...customSafePatternsNormalized,
 ];
 
 function stripSafeSegments(normalized = '') {

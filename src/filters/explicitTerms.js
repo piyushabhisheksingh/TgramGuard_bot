@@ -1,4 +1,43 @@
 // Central list of explicit/sexual/profane patterns (English, Hinglish, Hindi)
+import { customExplicitTerms } from './customTerms.js';
+
+const STRICT = /^(1|true|yes|on)$/i.test(process.env.EXPLICIT_STRICT || '');
+
+// Helper to generate aggressive relation phrases when STRICT mode is enabled
+function genAggressivePhrases() {
+  if (!STRICT) return [];
+  const relations = [
+    // Romanized family terms
+    'maa', 'maa', 'mummy', 'ammi', 'behen', 'bhen', 'bahen', 'bhabhi', 'mami', 'mausi', 'chachi', 'chacha', 'maam',
+  ];
+  const connectors = ['ki', 'ke'];
+  const nuclei = [
+    // Explicit nouns (romanized)
+    'chut', 'choot', 'chutt', 'lund', 'loda', 'lode', 'lauda', 'laude', 'gand', 'gaand', 'boobs', 'tits'
+  ];
+  const out = [];
+  for (const r of relations) {
+    for (const c of connectors) {
+      for (const n of nuclei) {
+        const rx = new RegExp(`(?:teri|tera|tumhari)?\s*${r}\s*${c}\s*${n}`, 'i');
+        out.push(rx);
+      }
+    }
+  }
+  // Devanagari variants for a small subset
+  const devRelations = ['माँ', 'मां', 'बहन', 'भाभी'];
+  const devConnectors = ['की', 'के'];
+  const devNuclei = ['चूत', 'लौड़ा', 'लंड'];
+  for (const r of devRelations) {
+    for (const c of devConnectors) {
+      for (const n of devNuclei) {
+        out.push(new RegExp(`${r}\s*${c}\s*${n}`, 'u'));
+      }
+    }
+  }
+  return out;
+}
+
 export const explicitTerms = [
   // sexual explicit (with common leet/spacing variants)
   /\b[s5][e3]x\b/i,
@@ -197,4 +236,8 @@ export const explicitTerms = [
   /\bchutiya\b/i,
   /\bmadarchod\b/i,
   /\bbehen\s?chod\b/i,
+  // Strict/aggressive auto-generated family+explicit combinations
+  ...genAggressivePhrases(),
+  // ---- end of built-ins ----
+  ...customExplicitTerms,
 ];

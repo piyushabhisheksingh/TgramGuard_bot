@@ -92,6 +92,7 @@ Limits
 - `PORT`: port for the minimal HTTP server (default 3000)
 - `BOT_OWNER_ID`: Telegram user ID of the bot owner (exempt from moderation)
 - `BOT_ADMIN_IDS`: comma or space-separated Telegram user IDs of bot admins (exempt)
+- `EXPLICIT_STRICT`: when `true`/`1`/`yes`/`on`, enables aggressive generated phrase patterns (family + explicit nouns) to catch more variants
 - `NOTIFY_CLEANUP`: when `true`/`1`/`yes`/`on`, auto-deletes moderation notices after a delay; otherwise messages persist (default off)
 - `NOTIFY_CLEANUP_SECONDS`: delay in seconds before deleting notices (defaults to 8 if cleanup is enabled)
 
@@ -103,6 +104,18 @@ Optional Supabase (for shared/multi-instance persistence):
 
 - By default, bot settings are stored in `data/settings.json` (auto-created).
 - If `SUPABASE_URL` and `SUPABASE_KEY` are set, global settings are stored in table `bot_settings` and per-chat settings in `chat_settings`.
+
+### Customizing explicit terms and safelist
+
+- Add thousands of extra slangs/phrases without code changes:
+  - `data/explicit_terms_custom.txt`: one term per line (literal words/phrases, `#` for comments)
+  - `data/explicit_terms_custom.json`: JSON array; supports plain strings or regex strings like `/pattern/flags`
+- Add false-positive safe terms:
+  - `data/safe_terms_custom.txt`: one benign word/phrase per line
+  - `data/safe_terms_custom.json`: JSON array of strings
+- Notes:
+  - Custom safelist terms are matched on the bot’s normalized text (lowercased, punctuation removed) to strip them before explicit detection.
+  - Use `EXPLICIT_STRICT=true` to enable a broader auto-generated set of family+explicit phrases (Hinglish/Hindi) if your community requires it.
 
 ## Troubleshooting
 
