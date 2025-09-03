@@ -94,6 +94,7 @@ export function settingsMiddleware() {
       '  /whitelist_remove <user_id> — or reply to a user to unwhitelist',
       '  /whitelist_list — show chat whitelist',
       '  /group_stats — show this chat’s moderation stats',
+      '  /user_stats [user_id] — show user stats (reply or pass id; defaults to you)',
       '  /rules_status — show global/chat/effective rule status',
       '',
       `Rules: ${RULE_KEYS.join(', ')}`,
@@ -143,6 +144,61 @@ export function settingsMiddleware() {
       ...Object.entries(weekly.byAction).map(([k, v]) => `  • ${k}: ${v}`),
     ];
     return ctx.reply(lines.join('\n'));
+  });
+
+  // User stats (per-chat, with optional "global" flag). Anyone can view.
+  composer.command('user_stats', async (ctx) => {
+    const tokens = ctx.message.text.trim().split(/\s+/);
+    const replyFrom = ctx.message?.reply_to_message?.from;
+    let targetId = replyFrom?.id;
+    // Accept numeric id in args
+    for (const t of tokens.slice(1)) {
+      const n = Number(t);
+      if (Number.isFinite(n)) { targetId = n; break; }
+    }
+    // Default to caller
+    if (!Number.isFinite(targetId)) targetId = ctx.from?.id;
+    if (!Number.isFinite(targetId)) return;
+    const globalFlag = tokens.includes('global');
+    const mod = await import('../logger.js');
+    const scopeChatId = globalFlag ? null : ctx.chat?.id;
+    const daily = await mod.getUserStatsPeriod(targetId, scopeChatId, 1);
+    const weekly = await mod.getUserStatsPeriod(targetId, scopeChatId, 7);
+    const lifetime = await mod.getUserLifetimeStats(targetId, scopeChatId);
+    const dailyAvg = weekly.total / 7;
+    const weekly28 = await mod.getUserStatsPeriod(targetId, scopeChatId, 28);
+    const weeklyAvg = weekly28.total / 4; // per-week avg over last 28 days
+    const risk = mod.computeRiskScore(weekly.byViolation);
+    const riskLabel = (s) => (s < 3 ? 'Low' : s < 10 ? 'Medium' : 'High');
+    const topViolations = Object.entries(weekly.byViolation)
+      .sort((a, b) => (b[1] || 0) - (a[1] || 0))
+      .slice(0, 3)
+      .map(([k, v]) => `${k}: ${v}`);
+    const scopeLabel = globalFlag ? 'across all chats' : 'in this chat';
+    const lines = [
+      `User stats for ${targetId} ${scopeLabel}:`,
+      `- today total: ${daily.total}`,
+      `- last 7 days total: ${weekly.total}`,
+      `- daily average (7d): ${isFinite(dailyAvg) ? dailyAvg.toFixed(2) : '0.00'}`,
+      `- weekly average (28d): ${isFinite(weeklyAvg) ? weeklyAvg.toFixed(2) : '0.00'}`,
+      `- lifetime total: ${lifetime.total}`,
+      `- risk score (7d): ${risk.toFixed(2)} (${riskLabel(risk)})`,
+      ...(topViolations.length ? [
+        '- top violations (7d):',
+        ...topViolations.map((s) => `  • ${s}`),
+      ] : []),
+      '- 7d by violation:',
+      ...Object.entries(weekly.byViolation).map(([k, v]) => `  • ${k}: ${v}`),
+    ];
+    return ctx.reply(lines.join('\n'));
+  });
+
+  // Global user stats command (alias)
+  composer.command('user_stats_global', async (ctx) => {
+    // Reuse handler with implicit global flag
+    const base = ctx.message.text.replace(/^\/user_stats_global\b/, '/user_stats global');
+    ctx.message.text = base;
+    return composer.middleware()(ctx, () => Promise.resolve());
   });
 
   // Admin management (owner only)

@@ -147,6 +147,23 @@ async function sbUpsertChatDaily(chatId, dateStr, action, violation) {
     .upsert({ chat_id: String(chatId), day: dateStr, ...merged, updated_at: new Date().toISOString() }, { onConflict: 'chat_id,day' });
 }
 
+async function sbUpsertUserDaily(userId, chatId, dateStr, action, violation) {
+  const sb = getSupabase();
+  if (!sb) return;
+  const { data, error } = await sb
+    .from('stats_user_daily')
+    .select('user_id,chat_id,day,total,by_violation,by_action')
+    .eq('user_id', String(userId))
+    .eq('chat_id', String(chatId))
+    .eq('day', dateStr)
+    .maybeSingle();
+  if (error && error.code !== 'PGRST116') return;
+  const merged = mergeCountersRow(data, action, violation);
+  await sb
+    .from('stats_user_daily')
+    .upsert({ user_id: String(userId), chat_id: String(chatId), day: dateStr, ...merged, updated_at: new Date().toISOString() }, { onConflict: 'user_id,chat_id,day' });
+}
+
 async function recordStatsSupabase(details, chat) {
   const sb = getSupabase();
   if (!sb) return;
@@ -157,6 +174,9 @@ async function recordStatsSupabase(details, chat) {
     await sbUpsertGlobalDaily(today, action, violation);
     if (chat?.id != null) {
       await sbUpsertChatDaily(chat.id, today, action, violation);
+    }
+    if (details.user?.id && chat?.id != null) {
+      await sbUpsertUserDaily(details.user.id, chat.id, today, action, violation);
     }
   } catch {
     // ignore persistence errors
@@ -202,6 +222,69 @@ export async function getGroupStatsPeriod(chatId, days = 1) {
     for (const [k, v] of Object.entries(row.by_action || {})) inc(agg.byAction, k, v);
   }
   return agg;
+}
+
+export async function getUserStatsPeriod(userId, chatId, days = 7) {
+  const sb = getSupabase();
+  if (!sb) {
+    // Fallback to empty if no DB
+    return { total: 0, byViolation: {}, byAction: {} };
+  }
+  const since = new Date();
+  since.setUTCDate(since.getUTCDate() - (days - 1));
+  const sinceStr = dayKey(since);
+  let q = sb
+    .from('stats_user_daily')
+    .select('day,total,by_violation,by_action')
+    .eq('user_id', String(userId))
+    .gte('day', sinceStr)
+    .order('day', { ascending: true });
+  if (chatId != null) q = q.eq('chat_id', String(chatId));
+  const { data } = await q;
+  const agg = { total: 0, byViolation: {}, byAction: {} };
+  for (const row of data || []) {
+    agg.total += row.total || 0;
+    for (const [k, v] of Object.entries(row.by_violation || {})) inc(agg.byViolation, k, v);
+    for (const [k, v] of Object.entries(row.by_action || {})) inc(agg.byAction, k, v);
+  }
+  return agg;
+}
+
+export async function getUserLifetimeStats(userId, chatId) {
+  const sb = getSupabase();
+  if (!sb) return { total: 0, byViolation: {}, byAction: {} };
+  let q = sb
+    .from('stats_user_daily')
+    .select('total,by_violation,by_action')
+    .eq('user_id', String(userId));
+  if (chatId != null) q = q.eq('chat_id', String(chatId));
+  const { data } = await q;
+  const agg = { total: 0, byViolation: {}, byAction: {} };
+  for (const row of data || []) {
+    agg.total += row.total || 0;
+    for (const [k, v] of Object.entries(row.by_violation || {})) inc(agg.byViolation, k, v);
+    for (const [k, v] of Object.entries(row.by_action || {})) inc(agg.byAction, k, v);
+  }
+  return agg;
+}
+
+export function computeRiskScore(byViolation = {}) {
+  const weights = {
+    no_explicit: 3,
+    bio_block: 4,
+    name_no_explicit: 2,
+    no_links: 1,
+    name_no_links: 1,
+    no_edit: 1,
+    max_len: 0.5,
+    gap_cleanup: 0.1,
+  };
+  let score = 0;
+  for (const [k, v] of Object.entries(byViolation)) {
+    const w = weights[k] ?? 1;
+    score += w * v;
+  }
+  return score;
 }
 
 export async function logAction(ctxOrApi, details = {}) {
