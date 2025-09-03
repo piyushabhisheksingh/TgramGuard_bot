@@ -91,8 +91,11 @@ const explicitTerms = [
   /\bbhen\s*ch[o0]d\b/i,              // bhen chod
   /\bbh[o0]sd[i1]\s*k[e3]\b/i,        // bhosdi ke (spaced)
   /\bbh[o0]s[a@]d[i1]k[e3]\b/i,        // bhosadike / bhosdike
+  /\bbh[o0]sr[i1]\s*w[ae]l[i1][ye]?\b/i, // bhosriwali/bhosriwaly/bhosriwale
+  /\bbh[o0]sr[i1]\s*k[e3]\b/i,        // bhosri ke
   /\bg[a@]a+nd\b/i,                    // gaand (ass)
   /\bg[a@]a+ndu\b/i,                   // gaandu
+  /\bch[o0]d[uú]\b/i,                  // chodu
   /\bl[uµ]nd\b/i,                      // lund
   /\bl[ao0]ud[ae]\b/i,                 // lauda / loda
   /\bch[uµo0]{1,2}t\b/i,               // chut / choot / ch00t
@@ -100,6 +103,7 @@ const explicitTerms = [
   /\bch[o0]de?\b/i,                    // chode / chod
   /\bch[o0]d(n[ae]|[ae])\b/i,          // chodna / chodne / choda / chode
   /\br[a@4]nd[i1y]\b/i,                // randi / r@ndi
+  /\br[ae]ndw[ae]\b/i,                 // randwa / rendwa
   /\brund[i1y]\b/i,                    // rundi
   /\bbsdk\b/i,                         // bsdk (abbr.)
   /\btatt[e3]s?\b/i,                   // tatte (balls)
