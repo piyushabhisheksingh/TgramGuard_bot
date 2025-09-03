@@ -206,7 +206,10 @@ export function containsExplicit(text = "") {
   if (explicitTerms.some((rx) => rx.test(text))) return true;
   // Obfuscation-aware path: normalize text and run a looser check
   const normalized = normalizeForExplicit(text);
-  return explicitTermsLoose.some((rx) => rx.test(normalized));
+  if (!explicitTermsLoose.some((rx) => rx.test(normalized))) return false;
+  // Strip safe segments and retest to reduce false positives
+  const stripped = stripSafeSegments(normalized);
+  return explicitTermsLoose.some((rx) => rx.test(stripped));
 }
 
 export function overCharLimit(text = "", limit = 200) {
@@ -245,5 +248,46 @@ function normalizeForExplicit(input = '') {
   s = s.replace(/[\s._\-\|*`'"~^+\=\/\\()\[\]{}:,;<>]+/g, '');
   // Collapse repeated characters (3+ → 2) to catch exxxtreme repeats
   s = s.replace(/([a-z\u0900-\u097F])\1{2,}/g, '$1$1');
+  return s;
+}
+
+// Safe words/phrases to reduce false positives on normalized text
+// These patterns assume the input has been normalized (lowercased, separators removed)
+const safePatternsNormalized = [
+  // "ass" related benign terms
+  /class/gi,
+  /pass(word|code)?/gi,
+  /assist(ant|ance)?/gi,
+  /assign(ment|ing|ed)?/gi,
+  /assess(ment|or|ing)?/gi,
+  /association|associate/gi,
+  /assam(ese)?/gi,
+  /passion(ate|ately)?/gi,
+  // "anal" benign terms
+  /analysis|analyst|analytic(s|al)?|analog(y|ic|ical|ue)?/gi,
+  // "cock" benign compounds
+  /peacock|cockpit|woodcock|weathercock|hancock/gi,
+  // "dick" benign names/titles
+  /dickens|dickinson|riddick/gi,
+  // "cum" benign terms
+  /cumulative|cumulate|accumulate(d|s|ing)?|document|succumb|cucumber|cumlaude/gi,
+  // "tit" benign terms
+  /title(d|s|r)?|titular|titania|titan(ic|ium)?/gi,
+  // Non-explicit uses of sex
+  /unisex|asexual/gi,
+  // Hinglish/Hindi benign or common phrases that could collide
+  /randhir/gi,
+  /randhawa/gi,
+  /gandhi/gi,
+  // Swedish university name
+  /lunduniversity|universityoflund/gi,
+  // Romanized Hindi for "leave it" to avoid conflict with explicit "chod"
+  /chh?odo/gi,         // chhodo / chodo
+  /chh?oddo/gi,        // chhoddo / choddo
+];
+
+function stripSafeSegments(normalized = '') {
+  let s = normalized;
+  for (const rx of safePatternsNormalized) s = s.replace(rx, '');
   return s;
 }
