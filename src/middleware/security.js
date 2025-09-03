@@ -162,6 +162,44 @@ export function securityMiddleware() {
     const text = msg.text ?? msg.caption ?? '';
     const entities = msg.entities ?? msg.caption_entities ?? [];
 
+    // Display name checks (apply existing rules to member's name)
+    // Build a display name string from first/last/username
+    const displayName = [
+      ctx.from?.first_name,
+      ctx.from?.last_name,
+      ctx.from?.username ? `@${ctx.from.username}` : null,
+    ]
+      .filter(Boolean)
+      .join(' ');
+    if (displayName) {
+      // Name: no links
+      if ((await isRuleEnabled('no_links', ctx.chat.id)) && textHasLink(displayName)) {
+        if (await ensureBotCanDelete(ctx)) {
+          try {
+            await ctx.api.deleteMessage(ctx.chat.id, msg.message_id);
+            await notifyAndCleanup(
+              ctx,
+              `${mentionHTML(ctx.from)} your display name contains a link. Please remove links from your name to participate.`
+            );
+          } catch (_) {}
+        }
+        return;
+      }
+      // Name: no explicit terms
+      if ((await isRuleEnabled('no_explicit', ctx.chat.id)) && containsExplicit(displayName)) {
+        if (await ensureBotCanDelete(ctx)) {
+          try {
+            await ctx.api.deleteMessage(ctx.chat.id, msg.message_id);
+            await notifyAndCleanup(
+              ctx,
+              `${mentionHTML(ctx.from)} your display name contains explicit content. Please change it to participate.`
+            );
+          } catch (_) {}
+        }
+        return;
+      }
+    }
+
     // Rule 5 (extended): bio moderation (links or explicit content)
     const userId = ctx.from?.id;
     if (userId) {
