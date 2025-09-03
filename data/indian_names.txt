@@ -1,0 +1,86 @@
+# Add one Indian name per line (case-insensitive).
+# These are normalized during matching, so punctuation and case don't matter.
+# This starter set focuses on names that could collide with explicit substrings
+# like "shit", "tit", "cum", "ass", or "gand".
+
+# "shit" collision names
+Akshita
+Ishita
+Akshit
+Ishit
+Nishita
+Nishit
+Nishith
+Lakshit
+Lakshita
+Harshit
+Harshita
+Darshit
+Darshita
+Krishit
+Krishita
+Rishit
+Rishita
+Yashit
+Yashita
+Aashit
+Aashita
+Ashit
+Ashita
+Ashitha
+Yashith
+Yashitha
+Kashit
+Kashita
+Kashitha
+Prashit
+Prashita
+Prashitha
+Vashit
+Vashita
+Vashitha
+Dishit
+Dishita
+Mishita
+Rashita
+Sushita
+Vishita
+
+# "tit" collision names
+Titiksha
+Titisha
+Tithi
+Titli
+Titas
+
+# "gand" collision names
+Gandhar
+Gandharv
+Gandharva
+
+# "cum" transliterations (Tamil-origin spellings)
+Cumar
+Cumara
+Cumaran
+Cumaraswamy
+Coomar
+Coomara
+Coomaraswamy
+
+# "ass" surname
+Bassi
+Shital
+Shitansh
+Shitanshu
+Shitij
+Shitiz
+Trishita
+Prishita
+Drishita
+Anushita
+Mishit
+Dikshit
+Dikshita
+Diksha
+Dixit
+Ishitha

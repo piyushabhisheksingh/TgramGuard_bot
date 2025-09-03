@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { createRequire } from 'node:module';
 
 function escapeRegex(s = '') {
   return String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -84,7 +85,92 @@ function loadSafeJson(filePath) {
 
 const SAFE_TXT = path.join(DATA_DIR, 'safe_terms_custom.txt');
 const SAFE_JSON = path.join(DATA_DIR, 'safe_terms_custom.json');
+// Optional: dedicated Indian names dictionary
+const INDIAN_NAMES_TXT = path.join(DATA_DIR, 'indian_names.txt');
+const INDIAN_NAMES_JSON = path.join(DATA_DIR, 'indian_names.json');
+// Optional: dedicated English names dictionary
+const ENGLISH_NAMES_TXT = path.join(DATA_DIR, 'english_names.txt');
+const ENGLISH_NAMES_JSON = path.join(DATA_DIR, 'english_names.json');
+
+// --- Optional: Load from installed NPM dictionary modules ---
+const requireM = createRequire(import.meta.url);
+
+function readMaybeFile(str = '') {
+  try {
+    if (typeof str !== 'string') return [];
+    // Try as path to text file; if JSON, parse
+    if (fs.existsSync(str)) {
+      if (/\.json$/i.test(str)) {
+        const raw = fs.readFileSync(str, 'utf8');
+        const data = JSON.parse(raw);
+        if (Array.isArray(data)) return data.filter((x) => typeof x === 'string');
+      }
+      const raw = fs.readFileSync(str, 'utf8');
+      return raw.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+    }
+  } catch {}
+  return [];
+}
+
+function extractStringsDeep(x, depth = 0) {
+  if (depth > 3) return [];
+  if (!x) return [];
+  if (typeof x === 'string') return readMaybeFile(x);
+  if (Array.isArray(x)) return x.filter((v) => typeof v === 'string');
+  if (typeof x === 'object') {
+    const out = [];
+    for (const v of Object.values(x)) {
+      out.push(...extractStringsDeep(v, depth + 1));
+    }
+    return out;
+  }
+  return [];
+}
+
+function loadModuleWordlist(moduleName) {
+  try {
+    const mod = requireM(moduleName);
+    return extractStringsDeep(mod);
+  } catch {
+    return [];
+  }
+}
+
+// Only whitelist dictionary terms that collide with risky substrings to avoid over-safelisting
+const RISKY_SUBSTRINGS = ['shit', 'tit', 'ass', 'cum', 'gand', 'cock', 'dick'];
+
+function buildSafeFromList(list = []) {
+  try {
+    const out = [];
+    const seen = new Set();
+    for (const term of list) {
+      if (typeof term !== 'string') continue;
+      const n = normalizeLite(term);
+      if (!n) continue;
+      if (!RISKY_SUBSTRINGS.some((r) => n.includes(r))) continue;
+      if (seen.has(n)) continue;
+      seen.add(n);
+      out.push(new RegExp(escapeRegex(n), 'gi'));
+    }
+    return out;
+  } catch {
+    return [];
+  }
+}
 export const customSafePatternsNormalized = [
   ...loadSafeTxt(SAFE_TXT),
   ...loadSafeJson(SAFE_JSON),
+  // If present, also load Indian names dictionary files
+  ...loadSafeTxt(INDIAN_NAMES_TXT),
+  ...loadSafeJson(INDIAN_NAMES_JSON),
+  // If present, also load English names dictionary files
+  ...loadSafeTxt(ENGLISH_NAMES_TXT),
+  ...loadSafeJson(ENGLISH_NAMES_JSON),
+  // If installed, load common npm dictionaries and filter to risky-collision terms
+  ...buildSafeFromList(loadModuleWordlist('safe-word-list')),
+  ...buildSafeFromList(loadModuleWordlist('stopwords-hi')),
+  ...buildSafeFromList(loadModuleWordlist('word-list')),
+  ...buildSafeFromList(loadModuleWordlist('word-list-json')),
+  ...buildSafeFromList(loadModuleWordlist('wordlist-english')),
+  ...buildSafeFromList(loadModuleWordlist('wordlist-english/english-words')),
 ];

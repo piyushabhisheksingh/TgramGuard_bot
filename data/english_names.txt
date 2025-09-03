@@ -1,0 +1,33 @@
+# Add one English (or common Western) name per line (case-insensitive).
+# These are normalized during matching to reduce false positives for
+# substrings like "ass", "tit", "cock", or "cum".
+
+# ass collisions
+Cassandra
+Cassie
+Cassidy
+Bassett
+Basset
+Passmore
+Passfield
+Passman
+Massimo
+
+# tit collisions
+Titus
+Titian
+Titiana
+
+# cock collisions (legit surnames)
+Cockburn
+Alcock
+Wilcock
+Hancock
+
+# dick collisions (already partially covered, adding common variants)
+Dickson
+Dicksonn
+
+# cum collisions (avoid "cumming"; include benign surnames/brands)
+Cummins
+Kummins

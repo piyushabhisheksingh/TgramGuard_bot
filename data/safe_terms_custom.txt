@@ -1,0 +1,24 @@
+# Benign Indian words/places that may collide with explicit substrings
+# One per line (case-insensitive). These are normalized during matching.
+
+# "chut" collisions (food/items)
+Chutney
+Chutni
+Chutki
+
+# "tit" collisions (Indian places/surnames)
+Titagarh
+Titwala
+Titaliya
+
+# "cock" benign term
+Cockroach
+
+# "gandh" benign compounds
+Gandhiji
+Gandhian
+Gandhinagar
+
+# Common variant spellings
+Sheetal
+Seetal

@@ -5,6 +5,8 @@
 export const urlRegex = /(?:https?:\/\/|www\.|t\.me\/|telegram\.me\/|tg:\/\/join|t\.me\/[+@]|t\.me\/joinchat|\b[a-z0-9-]+\.[a-z]{2,})(\/\S*)?/i;
 import { explicitTerms } from './filters/explicitTerms.js';
 import { customSafePatternsNormalized } from './filters/customTerms.js';
+import { createRequire } from 'node:module';
+const requireM = createRequire(import.meta.url);
 
 export function textHasLink(text = "") {
   if (!text) return false;
@@ -23,6 +25,8 @@ export function containsExplicit(text = "") {
   if (!text) return false;
   // Fast path on raw text
   if (explicitTerms.some((rx) => rx.test(text))) return true;
+  // Optional: token-based profanity check via `allprofanity` package if installed
+  if (hasProfanityToken(text)) return true;
   // Obfuscation-aware path: normalize text and run a looser check
   const normalized = normalizeForExplicit(text);
   if (!explicitTermsLoose.some((rx) => rx.test(normalized))) return false;
@@ -98,6 +102,74 @@ const safePatternsNormalized = [
   /randhir/gi,
   /randhawa/gi,
   /gandhi/gi,
+  // Indian names that contain "shit" as a substring (avoid false positives)
+  /akshita/gi,
+  /ishita/gi,
+  /akshit/gi,
+  /ishit/gi,
+  /lakshit/gi,
+  /lakshita/gi,
+  /nishita/gi,
+  /harshit/gi,
+  /harshita/gi,
+  /darshit/gi,
+  /darshita/gi,
+  /krishit/gi,
+  /krishita/gi,
+  /rishit/gi,
+  /rishita/gi,
+  /yashit/gi,
+  /yashita/gi,
+  /ashit/gi,
+  /ashita/gi,
+  /ashitha/gi,
+  /lakshith/gi,
+  /lakshitha/gi,
+  /nishit/gi,
+  /nishith/gi,
+  /dishit/gi,
+  /dishita/gi,
+  /mishita/gi,
+  /prashita/gi,
+  /vishita/gi,
+  /rashita/gi,
+  /sushita/gi,
+  /aashit/gi,
+  /aashita/gi,
+  /aashitha/gi,
+  /yashith/gi,
+  /yashitha/gi,
+  /kashit/gi,
+  /kashita/gi,
+  /kashitha/gi,
+  /prashit/gi,
+  /prashitha/gi,
+  /vashit/gi,
+  /vashita/gi,
+  /vashitha/gi,
+  /rashit/gi,
+  /rashitha?/gi,
+  // Benign names with "tit"
+  /titiksha/gi,
+  /titiksha/gi,
+  /titisha/gi,
+  /tithi/gi,
+  /titli/gi,
+  /titas/gi,
+  // Benign names with "gand"
+  /gandhar/gi,
+  /gandharv/gi,
+  /gandharva/gi,
+  // South-Indian spellings that include "cum" (Tamil transliterations)
+  /cumar/gi,
+  /cumara/gi,
+  /cumaran/gi,
+  /cumaraswamy/gi,
+  /coomar/gi,
+  /coomara/gi,
+  /coomaraswamy/gi,
+  // Punjabi surname that includes "ass"
+  /bassi/gi,
   // Swedish university name
   /lunduniversity|universityoflund/gi,
   // Romanized Hindi for "leave it" to avoid conflict with explicit "chod"
@@ -111,4 +183,45 @@ function stripSafeSegments(normalized = '') {
   let s = normalized;
   for (const rx of safePatternsNormalized) s = s.replace(rx, '');
   return s;
+}
+
+// --- Optional profanity list from `allprofanity` (token-based) ---
+let profanitySet = null; // Set<string>
+
+function extractStringsDeep(x, depth = 0) {
+  if (depth > 3) return [];
+  if (!x) return [];
+  if (typeof x === 'string') return [x];
+  if (Array.isArray(x)) return x.filter((v) => typeof v === 'string');
+  if (typeof x === 'object') {
+    const out = [];
+    for (const v of Object.values(x)) out.push(...extractStringsDeep(v, depth + 1));
+    return out;
+  }
+  return [];
+}
+
+function loadAllProfanitySet() {
+  if (profanitySet) return profanitySet;
+  try {
+    const mod = requireM('allprofanity');
+    const list = extractStringsDeep(mod);
+    const set = new Set(
+      list
+        .map((w) => String(w).toLowerCase().trim())
+        .filter((w) => w && /^[a-z]+$/.test(w))
+    );
+    profanitySet = set.size ? set : null;
+  } catch {
+    profanitySet = null;
+  }
+  return profanitySet;
+}
+
+function hasProfanityToken(text = '') {
+  const set = loadAllProfanitySet();
+  if (!set) return false;
+  const tokens = String(text).toLowerCase().split(/[^a-z]+/).filter(Boolean);
+  for (const t of tokens) if (set.has(t)) return true;
+  return false;
 }
