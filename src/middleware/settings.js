@@ -258,6 +258,7 @@ export function settingsMiddleware() {
       '  /whitelist_list — show chat whitelist',
       '  /group_stats — show this chat’s moderation stats',
       '  /user_stats [user_id] — show user stats (reply or pass id; defaults to you)',
+      '  /top_violators [days] [global] — list top 10 violators',
       '  /rules_status — show global/chat/effective rule status',
       '',
       `Rules: ${RULE_KEYS.join(', ')}`,
@@ -283,6 +284,24 @@ export function settingsMiddleware() {
     const format = tokens.includes('compact') ? 'compact' : 'pretty';
     const html = await buildGroupStatsMessage(ctx, format);
     return ctx.reply(html, { parse_mode: 'HTML', disable_web_page_preview: true, reply_markup: groupStatsKeyboard(format) });
+  });
+
+  // Top violators (per chat by default). Anyone can view
+  composer.command('top_violators', async (ctx) => {
+    const tokens = ctx.message.text.trim().split(/\s+/);
+    const daysTok = tokens.slice(1).find((t) => /^(\d+)$/.test(t));
+    const days = daysTok ? Number(daysTok) : 7;
+    const globalFlag = tokens.includes('global');
+    const mod = await import('../logger.js');
+    const list = await mod.getTopViolators(days, globalFlag ? null : ctx.chat.id, 10);
+    if (!list.length) return ctx.reply('No violations found for the selected period.');
+    const rows = list.map((u, i) => {
+      const topV = Object.entries(u.byViolation||{}).sort((a,b)=> (b[1]||0)-(a[1]||0))[0]?.[0] || '-';
+      return `${i+1}. <a href="tg://user?id=${u.userId}">${esc(u.userId)}</a> — total: <b>${u.total}</b>, risk: <b>${u.risk.toFixed(2)}</b>, top: <code>${esc(topV)}</code>`;
+    });
+    const scope = globalFlag ? 'across all chats' : 'in this chat';
+    const html = [`<b>Top ${list.length} violators (${esc(scope)}, last ${days}d)</b>`, ...rows].join('\n');
+    return ctx.reply(html, { parse_mode: 'HTML', disable_web_page_preview: true });
   });
 
   // Toggle handlers for bot/group stats
@@ -559,6 +578,7 @@ export function settingsMiddleware() {
           { command: 'group_stats', description: 'Show this chat\'s stats' },
           { command: 'user_stats', description: 'Show your stats (or reply/id)' },
           { command: 'user_stats_global', description: 'Show your global stats' },
+          { command: 'top_violators', description: 'List top violators' },
         ],
         { scope: { type: 'default' } }
       );
@@ -574,6 +594,7 @@ export function settingsMiddleware() {
           { command: 'whitelist_add', description: 'Whitelist a user ID in this chat' },
           { command: 'whitelist_remove', description: 'Remove a whitelisted user ID' },
           { command: 'whitelist_list', description: 'List chat whitelist' },
+          { command: 'top_violators', description: 'List top violators' },
         ],
         { scope: { type: 'all_chat_administrators' } }
       );

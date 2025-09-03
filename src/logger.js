@@ -287,6 +287,37 @@ export function computeRiskScore(byViolation = {}) {
   return score;
 }
 
+export async function getTopViolators(days = 7, chatId = null, limit = 10) {
+  const sb = getSupabase();
+  if (!sb) return [];
+  const since = new Date();
+  since.setUTCDate(since.getUTCDate() - (days - 1));
+  const sinceStr = dayKey(since);
+  let q = sb
+    .from('stats_user_daily')
+    .select('user_id,chat_id,day,total,by_violation')
+    .gte('day', sinceStr);
+  if (chatId != null) q = q.eq('chat_id', String(chatId));
+  const { data, error } = await q;
+  if (error) return [];
+  const agg = new Map(); // userId -> { total, byViolation }
+  for (const row of data || []) {
+    const uid = String(row.user_id);
+    let u = agg.get(uid);
+    if (!u) { u = { total: 0, byViolation: {} }; agg.set(uid, u); }
+    u.total += row.total || 0;
+    for (const [k, v] of Object.entries(row.by_violation || {})) inc(u.byViolation, k, v);
+  }
+  const arr = Array.from(agg.entries()).map(([userId, v]) => ({
+    userId,
+    total: v.total,
+    byViolation: v.byViolation,
+    risk: computeRiskScore(v.byViolation),
+  }));
+  arr.sort((a, b) => (b.total - a.total) || (b.risk - a.risk));
+  return arr.slice(0, limit);
+}
+
 export async function getUserRiskSummary(userId, chatId) {
   const weekly = await getUserStatsPeriod(userId, chatId, 7);
   const score = computeRiskScore(weekly.byViolation);
