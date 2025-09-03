@@ -22,3 +22,32 @@ Gandhinagar
 # Common variant spellings
 Sheetal
 Seetal
+
+# More Hindi safe words (Devanagari and romanized)
+# Benign Devanagari words/places that could collide
+चुटकी
+टिटवाला
+टिटागढ़
+गांधीजी
+गांधीनगर
+गांधीवादी
+
+# Romanized Hindi phrases for "leave" (to avoid false positives with explicit "chod")
+chhodna
+chhoda
+chhodne
+chhoddiya
+chhod diya
+mat chhodo
+
+# Indian places with "tit" transliteration
+Titlagarh
+Titabar
+
+# Benign Indian places/words with "cum"
+Cumbum
+Cumballa
+Cumilla
+
+# South-Indian benign suffix usage
+kutty

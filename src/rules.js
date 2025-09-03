@@ -4,6 +4,7 @@ export const RULE_KEYS = [
   'no_links',
   'no_explicit',
   'bio_block',
+  'funny_suffix',
 ];
 
 export const DEFAULT_RULES = {
@@ -12,6 +13,7 @@ export const DEFAULT_RULES = {
   no_links: true,
   no_explicit: true,
   bio_block: true,
+  funny_suffix: true,
 };
 
 export const DEFAULT_LIMITS = {
