@@ -212,8 +212,19 @@ export async function logAction(ctxOrApi, details = {}) {
 
   const api = ctxOrApi?.api || ctxOrApi; // support ctx or api
 
+  // Local time formatting (configurable)
   const now = new Date();
-  const ts = now.toISOString();
+  const locale = process.env.LOG_TIME_LOCALE || 'en-IN'; // default to Indian English
+  const timeZone = process.env.LOG_TIME_ZONE || 'Asia/Kolkata'; // default to IST
+  const ts = now.toLocaleString(locale, {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  });
 
   const user = details.user || (ctxOrApi?.from || ctxOrApi?.msg?.from);
   const chat = details.chat || ctxOrApi?.chat;
