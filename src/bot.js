@@ -7,6 +7,7 @@ import http from 'node:http';
 import { securityMiddleware } from './middleware/security.js';
 import { settingsMiddleware } from './middleware/settings.js';
 import { bootstrapAdminsFromEnv } from './store/settings.js';
+import { logActionPinned } from './logger.js';
 
 const { apiThrottler } = throttlerModule;
 const token = process.env.BOT_TOKEN;
@@ -44,6 +45,34 @@ bot.use(settingsMiddleware());
 // Optional: simple liveness command
 bot.command('ping', (ctx) => ctx.reply('pong'));
 
+// Log when bot is added to a new group and pin the log message
+bot.on('my_chat_member', async (ctx) => {
+  try {
+    const oldStatus = ctx.myChatMember?.old_chat_member?.status;
+    const newStatus = ctx.myChatMember?.new_chat_member?.status;
+    const joined = (oldStatus === 'left' || oldStatus === 'kicked') && (newStatus === 'member' || newStatus === 'administrator');
+    if (!joined) return;
+    const chat = ctx.chat ?? ctx.myChatMember?.chat;
+    let groupLink;
+    try {
+      if (chat?.username) {
+        groupLink = `https://t.me/${chat.username}`;
+      } else if (chat?.id) {
+        // Requires admin right; may fail for non-admin joins
+        groupLink = await bot.api.exportChatInviteLink(chat.id);
+      }
+    } catch (_) {}
+    await logActionPinned(bot, {
+      action: 'bot_joined_group',
+      action_type: 'lifecycle',
+      chat,
+      violation: '-',
+      content: `Joined group: ${chat?.title || chat?.id}`,
+      group_link: groupLink,
+    });
+  } catch (_) {}
+});
+
 // Bootstrap admins from env
 const ENV_BOT_OWNER_ID = Number(process.env.BOT_OWNER_ID || NaN);
 const ENV_BOT_ADMIN_IDS = new Set(
@@ -68,7 +97,7 @@ bot.catch((err) => {
 });
 
 // Startup: webhook (worker/server) or high-load runner
-const allowedUpdates = ['message', 'edited_message'];
+const allowedUpdates = ['message', 'edited_message', 'my_chat_member'];
 
 const USE_WEBHOOK = Boolean(process.env.WEBHOOK_URL);
 if (USE_WEBHOOK) {

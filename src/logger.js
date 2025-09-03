@@ -54,6 +54,7 @@ export async function logAction(ctxOrApi, details = {}) {
   const action = details.action || 'action';
   const actionType = details.action_type || details.actionType || 'moderation';
   const violation = details.violation || '-';
+  const groupLink = details.group_link;
   const contentRaw = typeof details.content === 'string' ? details.content : details.content?.text || '';
   const content = contentRaw ? escapeHtml(String(contentRaw).slice(0, 512)) : '';
 
@@ -61,13 +62,25 @@ export async function logAction(ctxOrApi, details = {}) {
   lines.push(`<b>Action:</b> ${escapeHtml(action)} (${escapeHtml(actionType)})`);
   lines.push(`<b>Violation:</b> ${escapeHtml(String(violation))}`);
   if (chat) lines.push(`<b>Group:</b> ${formatChat(chat)}`);
+  if (groupLink) lines.push(`<b>Group Link:</b> <a href="${groupLink}">${escapeHtml(groupLink)}</a>`);
   if (user) lines.push(`<b>User:</b> ${formatUser(user)}`);
   if (content) lines.push(`<b>Content:</b> ${content}`);
   lines.push(`<b>Time:</b> ${escapeHtml(ts)}`);
 
   const html = lines.join('\n');
   try {
-    await api.sendMessage(LOG_CHAT_ID, html, { parse_mode: 'HTML', disable_web_page_preview: true });
-  } catch (_) {}
+    const sent = await api.sendMessage(LOG_CHAT_ID, html, { parse_mode: 'HTML', disable_web_page_preview: true });
+    return sent;
+  } catch (_) {
+    return undefined;
+  }
 }
 
+export async function logActionPinned(ctxOrApi, details = {}) {
+  const sent = await logAction(ctxOrApi, details);
+  const LOG_CHAT_ID = process.env.LOG_CHAT_ID;
+  if (!sent || !LOG_CHAT_ID) return;
+  try {
+    await (ctxOrApi.api || ctxOrApi).pinChatMessage(LOG_CHAT_ID, sent.message_id, { disable_notification: true });
+  } catch (_) {}
+}
