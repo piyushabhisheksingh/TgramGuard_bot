@@ -299,20 +299,68 @@ export async function getUserRiskSummary(userId, chatId) {
 // Build a funny prefix using Hinglish/English synonyms per top violation, randomized
 export function buildFunnyPrefix(riskLabel, topViolation) {
   const synonyms = {
-    no_explicit: ['NSFW Ninja', 'Tharki Ustaad', 'Gandi Baat Guru', 'Sanskaar Breaker'],
-    bio_block: ['Bio Bandit', 'Jeevani Jugaadu', 'Bio Mein Dhandha', 'Profile Pe Popat'],
-    name_no_explicit: ['Name Nuisance', 'Naam Nalayak', 'Naam Ka Natija'],
-    no_links: ['Link Lord', 'Spam Sardar', 'Jod-Tod Jockey', 'Linkbaaz'],
-    name_no_links: ['Handle Hustler', 'Naam-Linkbaaz'],
-    no_edit: ['Edit Enthusiast', 'U-turn Ustaad', 'Palti Prabhu'],
-    max_len: ['Storyteller', 'Kahaani Machine', 'Essay Expert'],
-    gap_cleanup: ['Gap Gremlin', 'Khali-Jagah King'],
-    '-': ['Wildcard', 'Achanak Ajeeb'],
+    no_explicit: [
+      'NSFW Ninja', 'Tharki Ustaad', 'Gandi Baat Guru', 'Sanskaar Breaker',
+      'PG-13 Picasso', 'Filter Feku', 'Family-Friendly Fighter',
+      'Besharam Baazigar', 'Emoji Evader', 'Adab-Tabaah Artist'
+    ],
+    bio_block: [
+      'Bio Bandit', 'Jeevani Jugaadu', 'Bio Mein Dhandha', 'Profile Pe Popat',
+      'About-Me Aficionado', 'Intro Inspector', 'Parichay Pundit'
+    ],
+    name_no_explicit: [
+      'Name Nuisance', 'Naam Nalayak', 'Naam Ka Natija', 'Handle Houdini', 'Tag Troublemaker',
+      'NaamKaNautanki', 'UPI-Id Ustaad'
+    ],
+    no_links: [
+      'Link Lord', 'Spam Sardar', 'Jod-Tod Jockey', 'Linkbaaz', 'Backlink Baazigar', 'URL Ustaad',
+      'Hyperlink Hira', 'Staple-Staple Sher'
+    ],
+    name_no_links: [
+      'Handle Hustler', 'Naam-Linkbaaz', 'Tag Tycoon', 'Username Ustad'
+    ],
+    no_edit: [
+      'Edit Enthusiast', 'U-turn Ustaad', 'Palti Prabhu', 'Undo Ustaad', 'Ctrl+Z Chacha'
+    ],
+    max_len: [
+      'Storyteller', 'Kahaani Machine', 'Essay Expert', 'Paragraph Pandit', 'Typewriter Tycoon',
+      'Lambi Kahaani Legend'
+    ],
+    gap_cleanup: [
+      'Gap Gremlin', 'Khali-Jagah King', 'Time Traveller', 'Message Ninja', 'Between-Banter Baba'
+    ],
+    '-': ['Wildcard', 'Achanak Ajeeb', 'Vibe Variable', 'Andaz Ankahi'],
   };
+
+  const labelEmojis = {
+    High: ['🔥','🚨','💥','🧨','🥵'],
+    Medium: ['⚠️','🔶','😬','🧐','🤨'],
+    Low: ['🙂','🫡','👌','🧊','😌'],
+  };
+  const topicEmojis = {
+    no_explicit: ['🙈','🥵','🍑','🚫'],
+    bio_block: ['🧬','📝','🚫','🧾'],
+    name_no_explicit: ['🏷️','🤐','🫣'],
+    no_links: ['🔗','🚫','🖇️'],
+    name_no_links: ['🏷️','🔗','🚫'],
+    no_edit: ['✏️','↩️','📝'],
+    max_len: ['📜','🧾','🗞️'],
+    gap_cleanup: ['🧹','🕳️','🧽'],
+    '-': ['🎭','🎲'],
+  };
+
+  // Hinglish suffixes to add more spice (picked occasionally)
+  const suffixes = ['bhai', 'boss', 'ustad', 'yaar', 'bhidu', 'guru', 'champ'];
+
   const list = synonyms[topViolation] || synonyms['-'];
   const title = list[Math.floor(Math.random() * list.length)] || 'Wildcard';
-  const emoji = riskLabel === 'High' ? '🔥' : riskLabel === 'Medium' ? '⚠️' : '🙂';
-  return `[${riskLabel} · ${title}] ${emoji} `;
+  const e1list = labelEmojis[riskLabel] || labelEmojis.Low;
+  const e2list = topicEmojis[topViolation] || topicEmojis['-'];
+  const e1 = e1list[Math.floor(Math.random() * e1list.length)];
+  const e2 = e2list[Math.floor(Math.random() * e2list.length)];
+  const addSuffix = Math.random() < 0.5; // 50% chance to add a hinglish tag
+  const tag = addSuffix ? ` ${suffixes[Math.floor(Math.random() * suffixes.length)]}` : '';
+  return `[${riskLabel} · ${title}${tag}] ${e1}${e2} `;
 }
 
 export async function logAction(ctxOrApi, details = {}) {

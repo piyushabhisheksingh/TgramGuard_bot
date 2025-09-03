@@ -40,7 +40,7 @@ function mentionHTML(user) {
 
 // Cache funny prefixes per (chat,user) for 10 minutes to avoid constant DB hits
 const funnyPrefixCache = new Map(); // key `${chatId}:${userId}` -> { until, prefix }
-async function userPrefix(ctx, user) {
+async function userPrefix(ctx, user, currentViolation) {
   const chatId = ctx.chat?.id;
   const userId = user?.id;
   if (!Number.isFinite(chatId) || !Number.isFinite(userId)) return '';
@@ -50,7 +50,8 @@ async function userPrefix(ctx, user) {
   if (cached && cached.until > now) return cached.prefix;
   try {
     const { label, topViolation } = await getUserRiskSummary(userId, chatId);
-    const prefix = buildFunnyPrefix(label, topViolation);
+    const chosenType = currentViolation || topViolation;
+    const prefix = buildFunnyPrefix(label, chosenType);
     funnyPrefixCache.set(key, { until: now + 10 * 60 * 1000, prefix });
     return prefix;
   } catch {
@@ -58,8 +59,8 @@ async function userPrefix(ctx, user) {
   }
 }
 
-async function mentionWithPrefix(ctx, user) {
-  const pref = await userPrefix(ctx, user);
+async function mentionWithPrefix(ctx, user, currentViolation) {
+  const pref = await userPrefix(ctx, user, currentViolation);
   return `${pref}${mentionHTML(user)}`;
 }
 
@@ -172,7 +173,7 @@ export function securityMiddleware() {
           await ctx.api.deleteMessage(ctx.chat.id, ctx.editedMessage.message_id);
           await notifyAndCleanup(
             ctx,
-            `${await mentionWithPrefix(ctx, ctx.from)} editing messages is not allowed. Your message was removed.`
+            `${await mentionWithPrefix(ctx, ctx.from, 'no_edit')} editing messages is not allowed. Your message was removed.`
           );
           await logAction(ctx, { action: 'delete_message', action_type: 'moderation', violation: 'no_edit', user: ctx.from, chat: ctx.chat, content: ctx.editedMessage?.text || ctx.editedMessage?.caption || '' });
         } catch (_) {}
@@ -206,7 +207,7 @@ export function securityMiddleware() {
             await ctx.api.deleteMessage(ctx.chat.id, msg.message_id);
             await notifyAndCleanup(
               ctx,
-              `${mentionHTML(ctx.from)} your display name contains a link. Please remove links from your name to participate.`
+              `${await mentionWithPrefix(ctx, ctx.from, 'name_no_links')} your display name contains a link. Please remove links from your name to participate.`
             );
             await logAction(ctx, { action: 'delete_message', action_type: 'moderation', violation: 'name_no_links', user: ctx.from, chat: ctx.chat, content: displayName });
           } catch (_) {}
@@ -220,7 +221,7 @@ export function securityMiddleware() {
             await ctx.api.deleteMessage(ctx.chat.id, msg.message_id);
             await notifyAndCleanup(
               ctx,
-              `${mentionHTML(ctx.from)} your display name contains explicit content. Please change it to participate.`
+              `${await mentionWithPrefix(ctx, ctx.from, 'name_no_explicit')} your display name contains explicit content. Please change it to participate.`
             );
             await logAction(ctx, { action: 'delete_message', action_type: 'moderation', violation: 'name_no_explicit', user: ctx.from, chat: ctx.chat, content: displayName });
           } catch (_) {}
@@ -246,7 +247,7 @@ export function securityMiddleware() {
             : bioHasLink
             ? 'a link'
             : 'explicit content';
-            await notifyAndCleanup(ctx, `${await mentionWithPrefix(ctx, ctx.from)} cannot post because your bio contains ${reason}. Please update your bio to participate.`);
+          await notifyAndCleanup(ctx, `${await mentionWithPrefix(ctx, ctx.from, 'bio_block')} cannot post because your bio contains ${reason}. Please update your bio to participate.`);
           await logAction(ctx, { action: 'delete_message', action_type: 'moderation', violation: 'bio_block', user: ctx.from, chat: ctx.chat, content: bioText ? `[BIO] ${bioText}` : '' });
         } catch (_) {}
         }
@@ -264,7 +265,7 @@ export function securityMiddleware() {
           await ctx.api.deleteMessage(ctx.chat.id, msg.message_id);
           await notifyAndCleanup(
             ctx,
-            `${await mentionWithPrefix(ctx, ctx.from)} messages longer than ${limit} characters are not allowed.`
+            `${await mentionWithPrefix(ctx, ctx.from, 'max_len')} messages longer than ${limit} characters are not allowed.`
           );
           await logAction(ctx, { action: 'delete_message', action_type: 'moderation', violation: 'max_len', user: ctx.from, chat: ctx.chat, content: text });
         } catch (_) {}
@@ -279,7 +280,7 @@ export function securityMiddleware() {
       if (await ensureBotCanDelete(ctx)) {
         try {
           await ctx.api.deleteMessage(ctx.chat.id, msg.message_id);
-          await notifyAndCleanup(ctx, `${await mentionWithPrefix(ctx, ctx.from)} links are not allowed in this group.`);
+          await notifyAndCleanup(ctx, `${await mentionWithPrefix(ctx, ctx.from, 'no_links')} links are not allowed in this group.`);
           await logAction(ctx, { action: 'delete_message', action_type: 'moderation', violation: 'no_links', user: ctx.from, chat: ctx.chat, content: text });
         } catch (_) {}
       }
@@ -293,7 +294,7 @@ export function securityMiddleware() {
           await ctx.api.deleteMessage(ctx.chat.id, msg.message_id);
           await notifyAndCleanup(
             ctx,
-            `${await mentionWithPrefix(ctx, ctx.from)} explicit or sexual content is not allowed.`
+            `${await mentionWithPrefix(ctx, ctx.from, 'no_explicit')} explicit or sexual content is not allowed.`
           );
           await logAction(ctx, { action: 'delete_message', action_type: 'moderation', violation: 'no_explicit', user: ctx.from, chat: ctx.chat, content: text });
         } catch (_) {}
