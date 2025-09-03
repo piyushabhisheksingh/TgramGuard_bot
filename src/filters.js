@@ -92,7 +92,9 @@ const explicitTerms = [
   /\bbh[o0]sd[i1]\s*k[e3]\b/i,        // bhosdi ke (spaced)
   /\bbh[o0]s[a@]d[i1]k[e3]\b/i,        // bhosadike / bhosdike
   /\bbh[o0]sr[i1]\s*w[ae]l[i1][ye]?\b/i, // bhosriwali/bhosriwaly/bhosriwale
+  /\bbh[o0]sd[i1]w[ae]l[i1][ye]?\b/i,  // bhosdiwali/bhosdiwale
   /\bbh[o0]sr[i1]\s*k[e3]\b/i,        // bhosri ke
+  /\bbh[a@]i?nch[o0]d\b/i,             // bhainchod romanization
   /\bg[a@]a+nd\b/i,                    // gaand (ass)
   /\bg[a@]a+ndu\b/i,                   // gaandu
   /\bch[o0]d[uú]\b/i,                  // chodu
@@ -103,6 +105,7 @@ const explicitTerms = [
   /\bch[o0]de?\b/i,                    // chode / chod
   /\bch[o0]d(n[ae]|[ae])\b/i,          // chodna / chodne / choda / chode
   /\br[a@4]nd[i1y]\b/i,                // randi / r@ndi
+  /\br[ao]nd[i1]kh[a@]n[a@]\b/i,       // randikhana (brothel)
   /\br[ae]ndw[ae]\b/i,                 // randwa / rendwa
   /\brund[i1y]\b/i,                    // rundi
   /\bbsdk\b/i,                         // bsdk (abbr.)
@@ -124,16 +127,25 @@ const explicitTerms = [
   /बहनचोद/u,
   /भोसड़ी\s*के/u,
   /भोसडी\s*के/u,
+  /भोसडी(वाला|वाली)/u,
+  /भैंचोद/u,
+  /भैनचोद/u,
   /लौड़ा/u,
   /लौडे/u,
   /लंड/u,
   /गांड/u,
+  /गांडू/u,
   /गांड़/u,
   /रंडी/u,
+  /रंडीखाना/u,
   /चूत/u,
+  /चूतड़/u,
+  /चुतड़/u,
   /चुद(ना|ाई|वाई|वाना)/u,
   /चुत(िया|िये|िए|िया)/u,
-  /चोड(ना|ना|ता)/u,
+  /चोद(ना|ता|दी|दिया|ती|ते)/u,
+  /झांट/u,
+  /झाट/u,
   /बलात्कार/u,
   /हरामी/u,
   /हरामजादा/u,
