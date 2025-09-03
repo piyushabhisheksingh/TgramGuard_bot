@@ -97,7 +97,7 @@ bot.catch((err) => {
 });
 
 // Startup: webhook (worker/server) or high-load runner
-const allowedUpdates = ['message', 'edited_message', 'my_chat_member'];
+const allowedUpdates = ['message', 'edited_message', 'my_chat_member', 'callback_query'];
 
 const USE_WEBHOOK = Boolean(process.env.WEBHOOK_URL);
 if (USE_WEBHOOK) {

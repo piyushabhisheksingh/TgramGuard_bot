@@ -74,6 +74,90 @@ function formatRulesStatus(globalRules, chatRules, effective, limits) {
 export function settingsMiddleware() {
   const composer = new Composer();
 
+  // Small helpers for pretty HTML formatting
+  const esc = (s = '') =>
+    String(s)
+      .replaceAll('&', '&amp;')
+      .replaceAll('<', '&lt;')
+      .replaceAll('>', '&gt;');
+  const formatKV = (obj = {}) =>
+    Object.entries(obj)
+      .sort((a, b) => (b[1] || 0) - (a[1] || 0))
+      .map(([k, v]) => `• <code>${esc(k)}</code>: <b>${v}</b>`) // bullet lines
+      .join('\n');
+
+  async function fetchUserStats(targetId, chatIdOrNull) {
+    const mod = await import('../logger.js');
+    const daily = await mod.getUserStatsPeriod(targetId, chatIdOrNull, 1);
+    const weekly = await mod.getUserStatsPeriod(targetId, chatIdOrNull, 7);
+    const lifetime = await mod.getUserLifetimeStats(targetId, chatIdOrNull);
+    const dailyAvg = weekly.total / 7;
+    const weekly28 = await mod.getUserStatsPeriod(targetId, chatIdOrNull, 28);
+    const weeklyAvg = weekly28.total / 4; // per-week avg over last 28 days
+    const risk = mod.computeRiskScore(weekly.byViolation);
+    const weeklyTop = Object.entries(weekly.byViolation).sort((a,b)=> (b[1]||0)-(a[1]||0))[0]?.[0] || '-';
+    return { daily, weekly, lifetime, dailyAvg, weeklyAvg, risk, weeklyTop };
+  }
+
+  function userStatsKeyboard(uid, scope, format) {
+    return {
+      inline_keyboard: [
+        [
+          { text: `Scope: ${scope === 'chat' ? 'Chat ✅' : 'Chat'}`, callback_data: `ustats:${uid}:chat:${format}` },
+          { text: `Scope: ${scope === 'global' ? 'Global ✅' : 'Global'}`, callback_data: `ustats:${uid}:global:${format}` },
+        ],
+        [
+          { text: `Format: ${format === 'pretty' ? 'Pretty ✅' : 'Pretty'}`, callback_data: `ustats:${uid}:${scope}:pretty` },
+          { text: `Format: ${format === 'compact' ? 'Compact ✅' : 'Compact'}`, callback_data: `ustats:${uid}:${scope}:compact` },
+        ],
+      ],
+    };
+  }
+
+  async function buildUserStatsMessage(ctx, targetId, scope = 'chat', format = 'pretty') {
+    const mod = await import('../logger.js');
+    const chatIdOrNull = scope === 'global' ? null : ctx.chat?.id;
+    const { daily, weekly, lifetime, dailyAvg, weeklyAvg, risk, weeklyTop } = await fetchUserStats(targetId, chatIdOrNull);
+    const funnyPrefix = (await mod.buildFunnyPrefix(risk < 3 ? 'Low' : risk < 10 ? 'Medium' : 'High', weeklyTop)) || '';
+    if (format === 'compact') {
+      const parts = [];
+      parts.push(`${funnyPrefix}<b>User</b> <code>${esc(targetId)}</code>`);
+      parts.push(`scope: <i>${scope}</i>`);
+      parts.push(`today: <b>${daily.total}</b>`);
+      parts.push(`7d: <b>${weekly.total}</b>`);
+      parts.push(`avg(d): <b>${isFinite(dailyAvg) ? dailyAvg.toFixed(2) : '0.00'}</b>`);
+      parts.push(`avg(w): <b>${isFinite(weeklyAvg) ? weeklyAvg.toFixed(2) : '0.00'}</b>`);
+      parts.push(`life: <b>${lifetime.total}</b>`);
+      parts.push(`risk: <b>${risk.toFixed(2)}</b>`);
+      const top3 = Object.entries(weekly.byViolation).sort((a,b)=> (b[1]||0)-(a[1]||0)).slice(0,3)
+        .map(([k,v])=> `${esc(k)}=${v}`).join(', ');
+      if (top3) parts.push(`top: <code>${top3}</code>`);
+      return parts.join(' | ');
+    }
+    const riskLabel = (s) => (s < 3 ? 'Low' : s < 10 ? 'Medium' : 'High');
+    const topViolations = Object.entries(weekly.byViolation)
+      .sort((a, b) => (b[1] || 0) - (a[1] || 0))
+      .slice(0, 3)
+      .map(([k, v]) => `${k}: ${v}`);
+    const header = `${funnyPrefix}User stats for <code>${esc(targetId)}</code> ${esc(scope === 'global' ? 'across all chats' : 'in this chat')}`;
+    const html = [
+      `<b>${header}</b>`,
+      '',
+      `<b>🗓 Today</b> — Total: <b>${daily.total}</b>`,
+      '',
+      `<b>🗓 Last 7 Days</b> — Total: <b>${weekly.total}</b>`,
+      `• Daily avg: <b>${isFinite(dailyAvg) ? dailyAvg.toFixed(2) : '0.00'}</b> — Weekly avg: <b>${isFinite(weeklyAvg) ? weeklyAvg.toFixed(2) : '0.00'}</b>`,
+      `• Lifetime total: <b>${lifetime.total}</b>`,
+      `• Risk score (7d): <b>${risk.toFixed(2)}</b> (<i>${riskLabel(risk)}</i>)`,
+      topViolations.length ? `• <i>Top violations (7d)</i>\n${topViolations.map((s)=>`  • <code>${esc(s)}</code>`).join('\n')}` : '',
+      '',
+      `• <i>7d by violation</i>\n${formatKV(weekly.byViolation)}`,
+    ]
+      .filter(Boolean)
+      .join('\n');
+    return html;
+  }
+
   // Help
   composer.command(['settings', 'help'], async (ctx) => {
     const msg = [
@@ -107,20 +191,20 @@ export function settingsMiddleware() {
     if (!(await isBotAdminOrOwner(ctx))) return;
     const daily = await import('../logger.js').then(m => m.getBotStatsPeriod(1));
     const weekly = await import('../logger.js').then(m => m.getBotStatsPeriod(7));
-    const lines = [
-      'Bot stats:',
-      `- today total: ${daily.total}`,
-      '- today by violation:',
-      ...Object.entries(daily.byViolation).map(([k, v]) => `  • ${k}: ${v}`),
-      '- today by action:',
-      ...Object.entries(daily.byAction).map(([k, v]) => `  • ${k}: ${v}`),
-      `- last 7 days total: ${weekly.total}`,
-      '- last 7 days by violation:',
-      ...Object.entries(weekly.byViolation).map(([k, v]) => `  • ${k}: ${v}`),
-      '- last 7 days by action:',
-      ...Object.entries(weekly.byAction).map(([k, v]) => `  • ${k}: ${v}`),
-    ];
-    return ctx.reply(lines.join('\n'));
+    const html = [
+      `<b>📊 Bot Stats</b>`,
+      '',
+      `<b>🗓 Today</b> — Total: <b>${daily.total}</b>`,
+      formatKV(daily.byViolation) ? `• <i>By violation</i>\n${formatKV(daily.byViolation)}` : '',
+      formatKV(daily.byAction) ? `• <i>By action</i>\n${formatKV(daily.byAction)}` : '',
+      '',
+      `<b>🗓 Last 7 Days</b> — Total: <b>${weekly.total}</b>`,
+      formatKV(weekly.byViolation) ? `• <i>By violation</i>\n${formatKV(weekly.byViolation)}` : '',
+      formatKV(weekly.byAction) ? `• <i>By action</i>\n${formatKV(weekly.byAction)}` : '',
+    ]
+      .filter(Boolean)
+      .join('\n');
+    return ctx.reply(html, { parse_mode: 'HTML', disable_web_page_preview: true });
   });
 
   // Per-chat stats (chat admin with ban rights, or bot admin/owner)
@@ -130,20 +214,21 @@ export function settingsMiddleware() {
     if (!ok) return;
     const daily = await import('../logger.js').then(m => m.getGroupStatsPeriod(ctx.chat.id, 1));
     const weekly = await import('../logger.js').then(m => m.getGroupStatsPeriod(ctx.chat.id, 7));
-    const lines = [
-      `Stats for chat ${ctx.chat.title || ctx.chat.id}:`,
-      `- today total: ${daily.total}`,
-      '- today by violation:',
-      ...Object.entries(daily.byViolation).map(([k, v]) => `  • ${k}: ${v}`),
-      '- today by action:',
-      ...Object.entries(daily.byAction).map(([k, v]) => `  • ${k}: ${v}`),
-      `- last 7 days total: ${weekly.total}`,
-      '- last 7 days by violation:',
-      ...Object.entries(weekly.byViolation).map(([k, v]) => `  • ${k}: ${v}`),
-      '- last 7 days by action:',
-      ...Object.entries(weekly.byAction).map(([k, v]) => `  • ${k}: ${v}`),
-    ];
-    return ctx.reply(lines.join('\n'));
+    const title = esc(ctx.chat.title || ctx.chat.id);
+    const html = [
+      `<b>👥 Group Stats</b> — ${title}`,
+      '',
+      `<b>🗓 Today</b> — Total: <b>${daily.total}</b>`,
+      formatKV(daily.byViolation) ? `• <i>By violation</i>\n${formatKV(daily.byViolation)}` : '',
+      formatKV(daily.byAction) ? `• <i>By action</i>\n${formatKV(daily.byAction)}` : '',
+      '',
+      `<b>🗓 Last 7 Days</b> — Total: <b>${weekly.total}</b>`,
+      formatKV(weekly.byViolation) ? `• <i>By violation</i>\n${formatKV(weekly.byViolation)}` : '',
+      formatKV(weekly.byAction) ? `• <i>By action</i>\n${formatKV(weekly.byAction)}` : '',
+    ]
+      .filter(Boolean)
+      .join('\n');
+    return ctx.reply(html, { parse_mode: 'HTML', disable_web_page_preview: true });
   });
 
   // User stats (per-chat, with optional "global" flag). Anyone can view.
@@ -159,49 +244,53 @@ export function settingsMiddleware() {
     // Default to caller
     if (!Number.isFinite(targetId)) targetId = ctx.from?.id;
     if (!Number.isFinite(targetId)) return;
-    const globalFlag = tokens.includes('global');
-    const mod = await import('../logger.js');
-    const scopeChatId = globalFlag ? null : ctx.chat?.id;
-    const daily = await mod.getUserStatsPeriod(targetId, scopeChatId, 1);
-    const weekly = await mod.getUserStatsPeriod(targetId, scopeChatId, 7);
-    const lifetime = await mod.getUserLifetimeStats(targetId, scopeChatId);
-    const dailyAvg = weekly.total / 7;
-    const weekly28 = await mod.getUserStatsPeriod(targetId, scopeChatId, 28);
-    const weeklyAvg = weekly28.total / 4; // per-week avg over last 28 days
-    const risk = mod.computeRiskScore(weekly.byViolation);
-    const riskLabel = (s) => (s < 3 ? 'Low' : s < 10 ? 'Medium' : 'High');
-    const topViolations = Object.entries(weekly.byViolation)
-      .sort((a, b) => (b[1] || 0) - (a[1] || 0))
-      .slice(0, 3)
-      .map(([k, v]) => `${k}: ${v}`);
-    const scopeLabel = globalFlag ? 'across all chats' : 'in this chat';
-    const lbl = (s) => (s < 3 ? 'Low' : s < 10 ? 'Medium' : 'High');
-    const weeklyTop = Object.entries(weekly.byViolation).sort((a,b)=> (b[1]||0)-(a[1]||0))[0]?.[0] || '-';
-    const funnyPrefix = (await mod.buildFunnyPrefix(lbl(risk), weeklyTop)) || '';
-    const lines = [
-      `${funnyPrefix}User stats for ${targetId} ${scopeLabel}:`,
-      `- today total: ${daily.total}`,
-      `- last 7 days total: ${weekly.total}`,
-      `- daily average (7d): ${isFinite(dailyAvg) ? dailyAvg.toFixed(2) : '0.00'}`,
-      `- weekly average (28d): ${isFinite(weeklyAvg) ? weeklyAvg.toFixed(2) : '0.00'}`,
-      `- lifetime total: ${lifetime.total}`,
-      `- risk score (7d): ${risk.toFixed(2)} (${riskLabel(risk)})`,
-      ...(topViolations.length ? [
-        '- top violations (7d):',
-        ...topViolations.map((s) => `  • ${s}`),
-      ] : []),
-      '- 7d by violation:',
-      ...Object.entries(weekly.byViolation).map(([k, v]) => `  • ${k}: ${v}`),
-    ];
-    return ctx.reply(lines.join('\n'));
+    const scope = tokens.includes('global') ? 'global' : 'chat';
+    const format = tokens.includes('compact') ? 'compact' : 'pretty';
+    const html = await buildUserStatsMessage(ctx, targetId, scope, format);
+    return ctx.reply(html, {
+      parse_mode: 'HTML',
+      disable_web_page_preview: true,
+      reply_markup: userStatsKeyboard(targetId, scope, format),
+    });
   });
 
   // Global user stats command (alias)
   composer.command('user_stats_global', async (ctx) => {
-    // Reuse handler with implicit global flag
-    const base = ctx.message.text.replace(/^\/user_stats_global\b/, '/user_stats global');
-    ctx.message.text = base;
-    return composer.middleware()(ctx, () => Promise.resolve());
+    const tokens = ctx.message.text.trim().split(/\s+/);
+    const replyFrom = ctx.message?.reply_to_message?.from;
+    let targetId = replyFrom?.id;
+    for (const t of tokens.slice(1)) {
+      const n = Number(t);
+      if (Number.isFinite(n)) { targetId = n; break; }
+    }
+    if (!Number.isFinite(targetId)) targetId = ctx.from?.id;
+    if (!Number.isFinite(targetId)) return;
+    const html = await buildUserStatsMessage(ctx, targetId, 'global', 'pretty');
+    return ctx.reply(html, {
+      parse_mode: 'HTML',
+      disable_web_page_preview: true,
+      reply_markup: userStatsKeyboard(targetId, 'global', 'pretty'),
+    });
+  });
+
+  // Interactive scope/format switcher via inline buttons
+  composer.callbackQuery(/^ustats:(\d+):(chat|global):(pretty|compact)$/i, async (ctx) => {
+    const [, uid, scope, format] = ctx.match;
+    const html = await buildUserStatsMessage(ctx, Number(uid), scope, format);
+    try {
+      await ctx.editMessageText(html, {
+        parse_mode: 'HTML',
+        disable_web_page_preview: true,
+        reply_markup: userStatsKeyboard(Number(uid), scope, format),
+      });
+    } catch (_) {
+      await ctx.reply(html, {
+        parse_mode: 'HTML',
+        disable_web_page_preview: true,
+        reply_markup: userStatsKeyboard(Number(uid), scope, format),
+      });
+    }
+    return ctx.answerCallbackQuery();
   });
 
   // Admin management (owner only)
