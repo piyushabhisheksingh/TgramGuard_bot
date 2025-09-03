@@ -125,6 +125,34 @@ const explicitTerms = [
   /\bkutt[e3]\b/i,                     // kutte
   /\bkutt[e3]\s*ki\b/i,               // kutte ki
 
+  // Hinglish phrase slangs
+  /(bhen|behen|bahen)\s*ki\s*ch[uµo0]{1,2}t{1,2}\b/i, // bhen ki chut/choot/chutt
+  /(bhen|behen|bahen)\s*ke\s*pakod(e|ey|e)?\b/i,      // behen ke pakode/pakodey
+  /(maa|ma|ammi|mummy)\s*ki\s*ch[uµo0]{1,2}t{1,2}\b/i, // maa ki chut (variants)
+  /(maa|ma|ammi|mummy)\s*ke?\s*l[o0]d(e|a)?\b/i,       // maa ke lode/loda
+  /(bhen|behen|bahen)\s*ke?\s*l[o0]d(e|a)?\b/i,        // behen ke lode/loda
+  /(bhabhi|bhabi|bhabhiji)\s*ke?\s*(n[uµ]d[e3]s?|b[o0]{2}bs?|t[i1]ts|ch[uµo0]{1,2}t{1,2})\b/i,
+  /r[a@]nd[i1y]\s*ke?\s*(b[ea]cch[eaiy]|bache|bacha)\b/i, // randi ke bacche/bacha
+  /(g[a@]a?nd|gaand)\s*m[e3]?\s*(lund|l[ao0]d[ae]|dand[ae])\b/i, // gaand me lund/lauda/danda
+  /ch[uµo0]{1,2}t\s*m[e3]?\s*(m[a@]r(n[ae]|w[ae]|v[ao])|f[a@]d[eo]?)\b/i, // chut me marna/fadna
+  /(lund|l[ao0]d[ae])\s*ch(us|oos)[a-z]*\b/i,           // lund chus/choos
+  /(teri|tera|tumhari)\s*(maa|ma|ammi|mummy)\s*ki\s*ch[uµo0]{1,2}t{1,2}\b/i,
+  /(teri|tera|tumhari)\s*(behen|bhen|bahen)\s*(ki|ke)\s*(ch[uµo0]{1,2}t{1,2}|l[ao0]d[ea])\b/i,
+  /(suar|soo?ar|suwar|sooar|kutt[e3]?)\s*ke\s*(b[ae]cch[ea]?|aulaad)\b/i,
+  /(g[a@]a?nd|gaand)\s*f[a@]a?d(du|d[eo]?)?\b/i,
+  /(saali|saali)\s*r[a@]nd[i1y]\b/i,
+  /\b(mkc|bkc)\b/i,
+
+  // Hindi/Bhojpuri phrase slangs (Devanagari)
+  /(माँ|मां|अम्मी|मम्मी)\s*की\s*चूत/u,
+  /बहन\s*के\s*(लौड़ा|लौड़े)/u,
+  /(गांड|गांड़)\s*में\s*(लंड|लौड़ा|डंडा)/u,
+  /चूत\s*में\s*मार(ना|ो|ती|ते|ता)/u,
+  /रंडी\s*के\s*(बच्चे|बच्चा)/u,
+  /(तेरी|तेरा|तुम्हारी)\s*(माँ|मां)\s*की\s*चूत/u,
+  /(सुअर|कुत्ते)\s*के\s*(बच्चे|औलाद)/u,
+  /(गांड|गांड़)\s*फाड़/u,
+
   // Hindi (Devanagari) sexual/profanity
   /मादरचोद/u,
   /बहनचोद/u,
