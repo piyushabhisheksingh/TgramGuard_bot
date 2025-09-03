@@ -458,3 +458,79 @@ export async function logActionPinned(ctxOrApi, details = {}) {
     await (ctxOrApi.api || ctxOrApi).pinChatMessage(LOG_CHAT_ID, sent.message_id, { disable_notification: true });
   } catch (_) {}
 }
+
+// ---------- Presence tracking (distinct groups per user) ----------
+export async function recordUserPresence(ctx) {
+  const sb = getSupabase();
+  if (!sb) return;
+  const userId = ctx.from?.id;
+  const chatId = ctx.chat?.id;
+  if (!Number.isFinite(userId) || !Number.isFinite(chatId)) return;
+  try {
+    const nowIso = new Date().toISOString();
+    await sb
+      .from('user_chat_presence')
+      .upsert(
+        { user_id: String(userId), chat_id: String(chatId), first_seen: nowIso, last_seen: nowIso },
+        { onConflict: 'user_id,chat_id' }
+      );
+    await sb
+      .from('user_chat_presence')
+      .update({ last_seen: nowIso })
+      .eq('user_id', String(userId))
+      .eq('chat_id', String(chatId));
+  } catch {}
+}
+
+export async function getUserGroupCount(userId) {
+  const sb = getSupabase();
+  if (!sb) return 0;
+  try {
+    const { count } = await sb
+      .from('user_chat_presence')
+      .select('chat_id', { count: 'exact', head: true })
+      .eq('user_id', String(userId));
+    return count || 0;
+  } catch {
+    return 0;
+  }
+}
+
+export async function getUserGroupLinks(ctxOrApi, userId, { limit = 20, offset = 0 } = {}) {
+  const sb = getSupabase();
+  if (!sb) return [];
+  const api = ctxOrApi?.api || ctxOrApi;
+  try {
+    const start = Math.max(0, Number(offset) || 0);
+    const end = start + Math.max(1, Number(limit) || 20) - 1;
+    let q = sb
+      .from('user_chat_presence')
+      .select('chat_id')
+      .eq('user_id', String(userId));
+    const { data } = await q.range(start, end);
+    const out = [];
+    for (const row of data || []) {
+      const chatId = Number(row.chat_id ?? row?.chatId);
+      if (!Number.isFinite(chatId)) continue;
+      let link = '';
+      let title = '';
+      if (api?.getChat) {
+        try {
+          const chat = await api.getChat(chatId);
+          title = chat?.title || '';
+          if (chat?.username) link = `https://t.me/${chat.username}`;
+          if (!link) {
+            try {
+              const inv = await api.exportChatInviteLink(chatId);
+              if (inv) link = inv;
+            } catch {}
+          }
+        } catch {}
+      }
+      out.push({ chat_id: String(chatId), title, link });
+    }
+    return out;
+  } catch {
+    return [];
+  }
+}

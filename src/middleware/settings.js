@@ -1,5 +1,5 @@
 import { Composer } from 'grammy';
-import { logAction, getBotStats, getGroupStats } from '../logger.js';
+import { logAction, getBotStats, getGroupStats, getUserGroupCount, getUserGroupLinks } from '../logger.js';
 import { RULE_KEYS, DEFAULT_RULES, DEFAULT_LIMITS } from '../rules.js';
 import {
   addBotAdmin,
@@ -248,6 +248,7 @@ export function settingsMiddleware() {
       '  /rule_global_enable <rule> — enable a rule globally',
       '  /rule_global_disable <rule> — disable a rule globally',
       '  /maxlen_global_set <n> — set global max length limit',
+      '  /user_groups [user_id] [limit] — show user presence count and group links',
       '  /bot_stats — show bot-wide moderation stats',
       'Group owner/admin (with ban rights), bot admin or owner:',
       '  /rule_chat_enable <rule> — enable a rule for this chat',
@@ -313,6 +314,77 @@ export function settingsMiddleware() {
     } catch (_) {
       await ctx.reply(html, { parse_mode: 'HTML', disable_web_page_preview: true, reply_markup: botStatsKeyboard(format) });
     }
+    return ctx.answerCallbackQuery();
+  });
+
+  // User groups (presence + links) — owner or bot admin only
+  composer.command('user_groups', async (ctx) => {
+    if (!(await isBotAdminOrOwner(ctx))) return;
+    const tokens = ctx.message.text.trim().split(/\s+/);
+    const replyFrom = ctx.message?.reply_to_message?.from;
+    let targetId = replyFrom?.id;
+    let limit = 20;
+    let offset = 0;
+    // Parse args: numeric id and/or limit
+    for (const t of tokens.slice(1)) {
+      const n = Number(t);
+      if (Number.isFinite(n)) {
+        if (!targetId) targetId = n; else if (!limit) limit = n; else offset = n;
+      }
+    }
+    if (!Number.isFinite(targetId)) targetId = ctx.from?.id;
+    if (!Number.isFinite(targetId)) return;
+    try {
+      const count = await getUserGroupCount(targetId);
+      const groups = await getUserGroupLinks(ctx, targetId, { limit, offset });
+      const title = `User ${targetId} is present in ${count} group(s).`;
+      const start = Math.min(offset + 1, Math.max(count, 1));
+      const end = Math.min(offset + groups.length, count);
+      const header = `${title}\nShowing ${start}-${end} of ${count}`;
+      const lines = groups.length ? groups.map((g, i) => `${offset + i + 1}. ${g.link || `chat:${g.chat_id}`}${g.title ? ` — ${g.title}` : ''}`) : ['No links available (bot may lack rights).'];
+      const prevOff = Math.max(0, offset - limit);
+      const nextOff = offset + limit < count ? offset + limit : offset;
+      const kb = {
+        inline_keyboard: [[
+          { text: '⏮️ Prev', callback_data: `ugroups:${targetId}:${prevOff}:${limit}` },
+          { text: 'Next ⏭️', callback_data: `ugroups:${targetId}:${nextOff}:${limit}` },
+        ]],
+      };
+      return ctx.reply([header, ...lines].join('\n'), { reply_markup: kb, disable_web_page_preview: true });
+    } catch (e) {
+      return ctx.reply(`Failed to fetch presence: ${e?.message || e}`);
+    }
+  });
+
+  // Pagination handler for user_groups
+  composer.callbackQuery(/^ugroups:(\d+):(\d+):(\d+)$/i, async (ctx) => {
+    if (!(await isBotAdminOrOwner(ctx))) return ctx.answerCallbackQuery();
+    const [, uid, off, lim] = ctx.match;
+    const userId = Number(uid);
+    const offset = Number(off);
+    const limit = Number(lim) || 20;
+    try {
+      const count = await getUserGroupCount(userId);
+      const groups = await getUserGroupLinks(ctx, userId, { limit, offset });
+      const title = `User ${userId} is present in ${count} group(s).`;
+      const start = Math.min(offset + 1, Math.max(count, 1));
+      const end = Math.min(offset + groups.length, count);
+      const header = `${title}\nShowing ${start}-${end} of ${count}`;
+      const lines = groups.length ? groups.map((g, i) => `${offset + i + 1}. ${g.link || `chat:${g.chat_id}`}${g.title ? ` — ${g.title}` : ''}`) : ['No links available (bot may lack rights).'];
+      const prevOff = Math.max(0, offset - limit);
+      const nextOff = offset + limit < count ? offset + limit : offset;
+      const kb = {
+        inline_keyboard: [[
+          { text: '⏮️ Prev', callback_data: `ugroups:${userId}:${prevOff}:${limit}` },
+          { text: 'Next ⏭️', callback_data: `ugroups:${userId}:${nextOff}:${limit}` },
+        ]],
+      };
+      try {
+        await ctx.editMessageText([header, ...lines].join('\n'), { reply_markup: kb, disable_web_page_preview: true });
+      } catch {
+        await ctx.reply([header, ...lines].join('\n'), { reply_markup: kb, disable_web_page_preview: true });
+      }
+    } catch (_) {}
     return ctx.answerCallbackQuery();
   });
 
@@ -612,6 +684,7 @@ export function settingsMiddleware() {
           { command: 'maxlen_global_set', description: 'Set global max length' },
           { command: 'user_stats', description: 'Show user stats (reply/id)' },
           { command: 'user_stats_global', description: 'Show global user stats' },
+          { command: 'user_groups', description: 'Show user group presence' },
           { command: 'set_mycommands', description: 'Publish command menus' },
           { command: 'remove_mycommands', description: 'Clear command menus' },
         ],
