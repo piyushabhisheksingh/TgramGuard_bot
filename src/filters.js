@@ -87,23 +87,37 @@ export function addExplicitRuntime(terms = []) {
 function normalizeForExplicit(input = '') {
   // Lowercase
   let s = String(input).toLowerCase();
+  // Normalize compatibility forms (fullwidth, circled letters, etc.)
+  try { s = s.normalize('NFKC'); } catch {}
   // Remove zero-width and joiner characters
   s = s.replace(/[\u200B-\u200D\uFEFF\u2060]/g, '');
   // NFKD normalize and strip diacritics for Latin script
   try {
     s = s.normalize('NFKD').replace(/\p{M}+/gu, '');
   } catch (_) {}
-  // Leetspeak substitutions
+  // Leetspeak substitutions and homoglyphs
   const map = {
     '0': 'o', '1': 'i', '!': 'i', '3': 'e', '4': 'a', '@': 'a', '$': 's', '5': 's', '7': 't', '8': 'b', '9': 'g', 'µ': 'u',
-    // Common Cyrillic confusables → Latin
+    // Cyrillic → Latin
     'а': 'a', 'е': 'e', 'о': 'o', 'р': 'p', 'с': 's', 'х': 'x', 'у': 'y', 'і': 'i', 'ї': 'i', 'ј': 'j',
+    // Greek → Latin (lowercase)
+    'α': 'a', 'β': 'b', 'γ': 'g', 'δ': 'd', 'ε': 'e', 'ζ': 'z', 'η': 'n', 'ι': 'i', 'κ': 'k', 'λ': 'l', 'μ': 'm', 'ν': 'n',
+    'ο': 'o', 'π': 'p', 'ρ': 'p', 'σ': 's', 'ς': 's', 'τ': 't', 'υ': 'u', 'φ': 'f', 'χ': 'x', 'ψ': 'y', 'ω': 'w',
+    // Arabic-Indic digits → ASCII
+    '٠':'0','١':'1','٢':'2','٣':'3','٤':'4','٥':'5','٦':'6','٧':'7','٨':'8','٩':'9',
+    // Devanagari digits → ASCII
+    '०':'0','१':'1','२':'2','३':'3','४':'4','५':'5','६':'6','७':'7','८':'8','९':'9',
   };
-  s = s.replace(/[01!34@\$5789µаеорсхуіїј]/g, (ch) => map[ch] || ch);
+  s = s.replace(/[01!34@\$5789µаеорсхуіїјαβγδεζηικλμνξοπρσςτυφχψω٠-٩०-९]/g, (ch) => map[ch] || ch);
   // Transliterate Devanagari → Latin (rough mapping) to catch mixed-script abuse
   s = transliterateDevanagari(s);
-  // Remove common separators and punctuation to collapse obfuscations like s.e.x, s_e-x
-  s = s.replace(/[\s._\-\|*`'"~^+\=\/\\()\[\]{}:,;<>]+/g, '');
+  // Remove separators, punctuation, symbols (Unicode-aware) to collapse obfuscations like s.e.x, s_e-x, s•e•x
+  try {
+    s = s.replace(/[\p{P}\p{S}]+/gu, '');
+  } catch {
+    // Fallback for environments without Unicode property escapes
+    s = s.replace(/[\s._\-\|*`'"~^+\=\/\\()\[\]{}:,;<>]+/g, '');
+  }
   // Collapse repeated characters (3+ → 2) to catch exxxtreme repeats
   s = s.replace(/([a-z\u0900-\u097F])\1{2,}/g, '$1$1');
   return s;
