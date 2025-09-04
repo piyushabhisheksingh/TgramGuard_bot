@@ -264,28 +264,25 @@ export function settingsMiddleware() {
     return out.map((s) => s.trim()).filter(Boolean);
   }
 
+  function parseCommandArgs(ctx) {
+    try {
+      const text = ctx.message?.text || ctx.msg?.text || '';
+      // Strip "/abuse" and optional @botusername, then leading whitespace
+      return text.replace(/^\/(?:abuse)(?:@\w+)?\s*/i, '');
+    } catch { return ''; }
+  }
+
   composer.command('abuse', async (ctx) => {
     if (!(await isBotAdminOrOwner(ctx))) return ctx.reply('Admins only.');
-    const args = ctx.match || '';
+    const args = parseCommandArgs(ctx);
     let candidates = parseQuoted(args);
     if ((!candidates || !candidates.length) && ctx.msg?.reply_to_message) {
       const rep = ctx.msg.reply_to_message;
       const text = rep.text || rep.caption || '';
       // Heuristic: extract tokens with risky substrings
-      const risky = ['ass','cum','cock','dick','tit','shit','sex','gand','lund','chut','jhant','jhaat','jhat'];
-      const tokens = String(text)
-        .split(/[^\p{L}\p{N}@#._-]+/u)
-        .map((t) => t.trim())
-        .filter((t) => t.length >= 3 && t.length <= 50);
-      const seen = new Set();
-      for (const t of tokens) {
-        const low = t.toLowerCase();
-        if (!risky.some((r) => low.includes(r))) continue;
-        if (seen.has(low)) continue;
-        seen.add(low);
-        candidates.push(t);
-        if (candidates.length >= 10) break;
-      }
+      const tokens = tokenize(text);
+      const riskyTokens = extractRiskyTokens(text, 10);
+      candidates.push(...riskyTokens);
     }
     if (!candidates.length) {
       return ctx.reply('Usage: /abuse "word or phrase" (or reply to a message with /abuse)');
