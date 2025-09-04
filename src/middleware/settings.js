@@ -219,7 +219,7 @@ export function settingsMiddleware() {
     return out;
   }
 
-  composer.callbackQuery(/^rv:(ok|bad|addp|addw):([A-Za-z0-9_-]+)$/i, async (ctx) => {
+  composer.callbackQuery(/^rv:(ok|addp|addw):([A-Za-z0-9_-]+)$/i, async (ctx) => {
     if (!(await isBotAdminOrOwner(ctx))) return ctx.answerCallbackQuery({ text: 'Admins only', show_alert: true });
     const [, kind, id] = ctx.match;
     const review = consumeReview(id);
@@ -239,9 +239,6 @@ export function settingsMiddleware() {
     } else if (kind === 'addw') {
       // Safelist risky tokens from phrase
       cands = extractRiskyTokens(review.text, 20);
-    } else {
-      // legacy 'bad' path → risky tokens small batch
-      cands = extractRiskyTokens(review.text, 5);
     }
     const { added, persisted, dbError } = await addSafeTerms(cands);
     try { await ctx.editMessageReplyMarkup({ inline_keyboard: [] }); } catch {}

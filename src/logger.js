@@ -510,8 +510,6 @@ export async function logAction(ctxOrApi, details = {}) {
         inline_keyboard: [
           [ { text: 'Valid ✅', callback_data: `rv:ok:${rid}` } ],
           [ { text: 'Safelist Phrase', callback_data: `rv:addp:${rid}` }, { text: 'Safelist Words', callback_data: `rv:addw:${rid}` } ],
-          // Backward compatibility (old handler still recognizes rv:bad)
-          [ { text: 'Legacy: Invalid — Safelist', callback_data: `rv:bad:${rid}` } ],
         ],
       };
     }
