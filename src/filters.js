@@ -100,6 +100,8 @@ function normalizeForExplicit(input = '') {
     'а': 'a', 'е': 'e', 'о': 'o', 'р': 'p', 'с': 's', 'х': 'x', 'у': 'y', 'і': 'i', 'ї': 'i', 'ј': 'j',
   };
   s = s.replace(/[01!34@\$5789µаеорсхуіїј]/g, (ch) => map[ch] || ch);
+  // Transliterate Devanagari → Latin (rough mapping) to catch mixed-script abuse
+  s = transliterateDevanagari(s);
   // Remove common separators and punctuation to collapse obfuscations like s.e.x, s_e-x
   s = s.replace(/[\s._\-\|*`'"~^+\=\/\\()\[\]{}:,;<>]+/g, '');
   // Collapse repeated characters (3+ → 2) to catch exxxtreme repeats
@@ -118,6 +120,27 @@ function stripSafeSegments(normalized = '') {
   let s = normalized;
   for (const rx of currentSafePatterns()) s = s.replace(rx, '');
   return s;
+}
+
+// Basic Devanagari → Latin transliteration (sufficient for abuse words)
+function transliterateDevanagari(s = '') {
+  const m = new Map(Object.entries({
+    'अ':'a','आ':'aa','इ':'i','ई':'ii','उ':'u','ऊ':'uu','ए':'e','ऐ':'ai','ओ':'o','औ':'au','ऋ':'ri',
+    'ा':'aa','ि':'i','ी':'ii','ु':'u','ू':'uu','े':'e','ै':'ai','ो':'o','ौ':'au','ं':'n','ँ':'n','ः':'h','्':'',
+    'क':'k','ख':'kh','ग':'g','घ':'gh','ङ':'n','च':'ch','छ':'chh','ज':'j','झ':'jh','ञ':'n','ट':'t','ठ':'th','ड':'d','ढ':'dh','ण':'n',
+    'त':'t','थ':'th','द':'d','ध':'dh','न':'n','प':'p','फ':'ph','ब':'b','भ':'bh','म':'m','य':'y','र':'r','ल':'l','व':'v','श':'sh','ष':'sh','स':'s','ह':'h',
+    'क़':'q','ख़':'kh','ग़':'g','ज़':'z','ड़':'d','ढ़':'dh','फ़':'f','य़':'y',
+  }));
+  let out = '';
+  for (const ch of s) {
+    const cp = ch.codePointAt(0) || 0;
+    if (cp >= 0x0900 && cp <= 0x097F) {
+      out += m.get(ch) ?? '';
+    } else {
+      out += ch;
+    }
+  }
+  return out;
 }
 
 // --- Optional profanity list from `allprofanity` (token-based) ---
