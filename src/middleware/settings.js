@@ -197,26 +197,29 @@ export function settingsMiddleware() {
   }
 
   // -------- Review callbacks for explicit detections --------
-  function extractSafeCandidates(text = '') {
-    const risky = ['ass','cum','cock','dick','tit','shit','sex','gand','lund','chut','jhant','jhaat','jhat'];
-    const tokens = String(text)
+  const RISKY = ['ass','cum','cock','dick','tit','shit','sex','gand','lund','chut','jhant','jhaat','jhat'];
+  function tokenize(text = '') {
+    return String(text)
       .split(/[^\p{L}\p{N}@#._-]+/u)
       .map((t) => t.trim())
-      .filter((t) => t.length >= 3 && t.length <= 50);
+      .filter((t) => t.length >= 3 && t.length <= 64);
+  }
+  function extractRiskyTokens(text = '', limit = 10) {
+    const tokens = tokenize(text);
     const out = [];
     const seen = new Set();
     for (const t of tokens) {
       const low = t.toLowerCase();
-      if (!risky.some((r) => low.includes(r))) continue;
+      if (!RISKY.some((r) => low.includes(r))) continue;
       if (seen.has(low)) continue;
       seen.add(low);
       out.push(t);
-      if (out.length >= 5) break; // avoid spamming
+      if (out.length >= limit) break;
     }
     return out;
   }
 
-  composer.callbackQuery(/^rv:(ok|bad):([A-Za-z0-9_-]+)$/i, async (ctx) => {
+  composer.callbackQuery(/^rv:(ok|bad|addp|addw):([A-Za-z0-9_-]+)$/i, async (ctx) => {
     if (!(await isBotAdminOrOwner(ctx))) return ctx.answerCallbackQuery({ text: 'Admins only', show_alert: true });
     const [, kind, id] = ctx.match;
     const review = consumeReview(id);
@@ -228,11 +231,24 @@ export function settingsMiddleware() {
       try { await ctx.editMessageReplyMarkup({ inline_keyboard: [] }); } catch {}
       return ctx.answerCallbackQuery({ text: 'Marked valid', show_alert: false });
     }
-    // bad -> add safelist candidates
-    const cands = extractSafeCandidates(review.text);
-    const added = await addSafeTerms(cands);
+    let cands = [];
+    if (kind === 'addp') {
+      // Safelist entire phrase (trim + cap length)
+      const phrase = String(review.text || '').slice(0, 160).trim();
+      if (phrase) cands = [phrase];
+    } else if (kind === 'addw') {
+      // Safelist risky tokens from phrase
+      cands = extractRiskyTokens(review.text, 20);
+    } else {
+      // legacy 'bad' path → risky tokens small batch
+      cands = extractRiskyTokens(review.text, 5);
+    }
+    const { added, persisted, dbError } = await addSafeTerms(cands);
     try { await ctx.editMessageReplyMarkup({ inline_keyboard: [] }); } catch {}
-    return ctx.answerCallbackQuery({ text: added ? `Added ${added} term(s) to safelist` : 'No suitable terms found', show_alert: false });
+    const msg = added
+      ? `Safelisted ${added} term(s)${persisted ? ' · DB saved' : dbError ? ' · DB error' : ''}`
+      : 'No suitable terms found';
+    return ctx.answerCallbackQuery({ text: msg, show_alert: false });
   });
 
   // -------- /abuse command: add explicit phrases/words --------

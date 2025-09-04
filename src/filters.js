@@ -3,7 +3,7 @@
 // URL/Invite detection
 // - Detects general URLs, telegram links, and invite patterns
 export const urlRegex = /(?:https?:\/\/|www\.|t\.me\/|telegram\.me\/|tg:\/\/join|t\.me\/[+@]|t\.me\/joinchat|\b[a-z0-9-]+\.[a-z]{2,})(\/\S*)?/i;
-import { explicitTerms, safePatternsNormalized as lexiconSafe } from './filters/lexicon.js';
+import { explicitTerms, getSafePatternsNormalized } from './filters/lexicon.js';
 import { createRequire } from 'node:module';
 const requireM = createRequire(import.meta.url);
 
@@ -109,11 +109,14 @@ function normalizeForExplicit(input = '') {
 
 // Safe words/phrases to reduce false positives on normalized text
 // These patterns assume the input has been normalized (lowercased, separators removed)
-const safePatternsNormalized = lexiconSafe;
+// Retrieve dynamically so runtime additions are included
+function currentSafePatterns() {
+  return getSafePatternsNormalized();
+}
 
 function stripSafeSegments(normalized = '') {
   let s = normalized;
-  for (const rx of safePatternsNormalized) s = s.replace(rx, '');
+  for (const rx of currentSafePatterns()) s = s.replace(rx, '');
   return s;
 }
 

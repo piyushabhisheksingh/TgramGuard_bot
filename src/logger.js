@@ -507,10 +507,12 @@ export async function logAction(ctxOrApi, details = {}) {
     if (violation === 'no_explicit' || violation === 'name_no_explicit') {
       const rid = createReview(contentRaw);
       replyMarkup = {
-        inline_keyboard: [[
-          { text: 'Valid ✅', callback_data: `rv:ok:${rid}` },
-          { text: 'Invalid — Safelist', callback_data: `rv:bad:${rid}` },
-        ]],
+        inline_keyboard: [
+          [ { text: 'Valid ✅', callback_data: `rv:ok:${rid}` } ],
+          [ { text: 'Safelist Phrase', callback_data: `rv:addp:${rid}` }, { text: 'Safelist Words', callback_data: `rv:addw:${rid}` } ],
+          // Backward compatibility (old handler still recognizes rv:bad)
+          [ { text: 'Legacy: Invalid — Safelist', callback_data: `rv:bad:${rid}` } ],
+        ],
       };
     }
     const sent = await api.sendMessage(LOG_CHAT_ID, html, { parse_mode: 'HTML', disable_web_page_preview: true, reply_markup: replyMarkup });

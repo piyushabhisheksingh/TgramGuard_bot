@@ -257,12 +257,24 @@ export async function addSafeTerms(terms = []) {
     try { fs.appendFileSync(SAFE_TXT, `${raw}\n`); } catch {}
     rows.push({ term: raw, created_at: new Date().toISOString() });
   }
+  let persisted = 0;
+  let dbError = null;
   try {
     const sb = getSupabase();
     if (sb && rows.length) {
       const table = process.env.SAFE_TERMS_TABLE || 'safe_terms';
-      await sb.from(table).upsert(rows, { onConflict: 'term' });
+      const { data, error } = await sb.from(table).upsert(rows, { onConflict: 'term' }).select('term');
+      if (error) {
+        dbError = error.message || String(error);
+        // Log once for visibility
+        console.warn('[safe_terms] upsert failed:', dbError);
+      } else {
+        persisted = Array.isArray(data) ? data.length : rows.length;
+      }
     }
-  } catch {}
-  return added;
+  } catch (e) {
+    dbError = e?.message || String(e);
+    console.warn('[safe_terms] upsert threw:', dbError);
+  }
+  return { added, persisted, dbError };
 }

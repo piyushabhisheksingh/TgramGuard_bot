@@ -8,7 +8,7 @@ import { customSafePatternsNormalized, customExplicitTerms } from './customTerms
 export const explicitTerms = [...explicitBase, ...customExplicitTerms];
 
 // Base safelist patterns from filters.js plus custom safelist patterns compiled from data files
-export const safePatternsNormalized = [
+const baseSafePatterns = [
   // "ass" related benign terms
   /class/gi,
   /pass(word|code)?/gi,
@@ -106,9 +106,12 @@ export const safePatternsNormalized = [
   // Romanized Hindi for "leave it" to avoid conflict with explicit "chod"
   /chh?odo/gi,         // chhodo / chodo
   /chh?oddo/gi,        // chhoddo / choddo
-  // Merge custom safelist last
-  ...customSafePatternsNormalized,
 ];
+
+export function getSafePatternsNormalized() {
+  // Always reflect current customSafePatternsNormalized at runtime
+  return baseSafePatterns.concat(customSafePatternsNormalized);
+}
 
 // Optional: export raw name lists from data for convenience
 const DATA_DIR = path.join(process.cwd(), 'data');
@@ -134,4 +137,3 @@ function loadNameList(basenameTxt, basenameJson) {
 
 export const indianNames = loadNameList('indian_names.txt', 'indian_names.json');
 export const englishNames = loadNameList('english_names.txt', 'english_names.json');
-
