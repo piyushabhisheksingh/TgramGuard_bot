@@ -57,6 +57,14 @@ Titas
 Gandhar
 Gandharv
 Gandharva
+Gandhari
+Sugandha
+Sugandhika
+
+# Popular names that include jhan/jha patterns (benign)
+Jhanvi
+Janhvi
+Jhansi
 
 # "cum" transliterations (Tamil-origin spellings)
 Cumar

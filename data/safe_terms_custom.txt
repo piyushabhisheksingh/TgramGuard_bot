@@ -5,6 +5,8 @@
 Chutney
 Chutni
 Chutki
+Chutkule
+Chutkara
 
 # "tit" collisions (Indian places/surnames)
 Titagarh
@@ -14,18 +16,41 @@ Titaliya
 # "cock" benign term
 Cockroach
 
+# More benign usages of "cock" (birds, surnames, common words)
+Cockatoo
+Cockerel
+Shuttlecock
+Cocktail
+Babcock
+Cockburn
+Haycock
+
 # "gandh" benign compounds
 Gandhiji
 Gandhian
 Gandhinagar
+Gandhipuram
+Gandhigram
+Gandhipet
+Gandhara
+Gandhak
+Gandak
+Sugandh
+Sugandha
+Sugandhit
 
 # Common variant spellings
 Sheetal
 Seetal
+Shital
+Shitala
+Sheetala
 
 # More Hindi safe words (Devanagari and romanized)
 # Benign Devanagari words/places that could collide
 चुटकी
+चुटकुले
+चुटकारा
 टिटवाला
 टिटागढ़
 गांधीजी
@@ -43,11 +68,129 @@ mat chhodo
 # Indian places with "tit" transliteration
 Titlagarh
 Titabar
+Titabor
+Tithal
+
+# Global benign with "tit"
+Titicaca
+Lake Titicaca
 
 # Benign Indian places/words with "cum"
 Cumbum
 Cumballa
 Cumilla
+Cumbria
+Cumberland
+Cumin
+Cummins
+Cumberbatch
 
 # South-Indian benign suffix usage
 kutty
+
+# English words with benign "ass" collisions (normalized scanning)
+passport
+passenger
+passage
+compass
+massachusetts
+massive
+passive
+assam
+assamese
+assistant
+assistance
+associate
+association
+assignment
+assimilate
+assurance
+passcode
+passbook
+passenger
+
+# Words that collide with "penis" in normalized scanning
+peninsula
+peninsular
+peninsulate
+penistone
+apennine
+apennines
+
+# Hinglish/Hindi benign words around "jhant/jhaat/jhat" collisions
+Jhansi
+Jhanvi
+Janhvi
+Jhatka
+Jhatpat
+Jhankar
+झांसी
+झटका
+झटपट
+झंकार
+
+# Benign English proper nouns around "gand" and "lund"
+Gandalf
+Lund
+Lund University
+Lundgren
+Lundqvist
+Lundstrom
+Lundmark
+Lundin
+
+# English words and proper nouns containing "sex" but benign
+sussex
+essex
+middlesex
+sextant
+sexton
+sextet
+sextuple
+sextuplet
+sexagenarian
+sexennial
+sexdigital
+sextillion
+
+# Devanagari transliterations for the above (benign proper nouns)
+मिडलसेक्स
+एसेक्स
+ससेक्स
+
+# Benign Hindi/Indian names with "shit" substring (romanized)
+akshita
+lakshita
+lakshit
+kshitij
+kshiti
+dikshit
+dixit
+prakshit
+dakshita
+yakshit
+rakshit
+rakshita
+
+# Benign Hindi/Indian names with "shit" substring (Devanagari)
+अक्षिता
+लक्षिता
+लक्षित
+क्षितिज
+क्षिति
+दिक्षित
+दीक्षित
+रक्षित
+रक्षिता
+प्रक्षित
+
+# Benign terms colliding with Hinglish "lauda" (laud- family)
+laudable
+laudably
+laudation
+laudatory
+laudanum
+lauderdale
+lauder
+claudia
+klaudia
