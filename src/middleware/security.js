@@ -35,7 +35,8 @@ function escapeHtml(s = '') {
 
 function mentionHTML(user) {
   const name = [user?.first_name, user?.last_name].filter(Boolean).join(' ') || 'user';
-  return `<a href="tg://user?id=${user.id}">${escapeHtml(name)}</a>`;
+  const id = user?.id ?? '?';
+  return `<a href="tg://user?id=${id}">${escapeHtml(name)} [${id}]</a>`;
 }
 
 // Light-hearted Hinglish suffixes per violation type (playful only)
