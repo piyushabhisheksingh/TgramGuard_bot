@@ -269,6 +269,42 @@ export async function getBotStatsPeriod(days = 1) {
   return agg;
 }
 
+// Convenience ranges for bot stats
+export async function getBotMonthlyStats() {
+  return getBotStatsPeriod(30);
+}
+
+export async function getBotYearlyStats() {
+  return getBotStatsPeriod(365);
+}
+
+export async function getBotLifetimeStats() {
+  const sb = getSupabase();
+  if (!sb) {
+    // Fallback: aggregate from all recent logs kept in memory
+    const agg = { total: 0, byViolation: {}, byAction: {} };
+    try {
+      for (const row of recentLogs) {
+        agg.total += 1;
+        inc(agg.byViolation, row.violation || '-');
+        inc(agg.byAction, row.action || 'action');
+      }
+    } catch {}
+    return agg;
+  }
+  const { data } = await sb
+    .from('stats_global_daily')
+    .select('day,total,by_violation,by_action')
+    .order('day', { ascending: true });
+  const agg = { total: 0, byViolation: {}, byAction: {} };
+  for (const row of data || []) {
+    agg.total += row.total || 0;
+    for (const [k, v] of Object.entries(row.by_violation || {})) inc(agg.byViolation, k, v);
+    for (const [k, v] of Object.entries(row.by_action || {})) inc(agg.byAction, k, v);
+  }
+  return agg;
+}
+
 export async function getGroupStatsPeriod(chatId, days = 1) {
   const sb = getSupabase();
   if (!sb) return getGroupStats(chatId);
@@ -280,6 +316,45 @@ export async function getGroupStatsPeriod(chatId, days = 1) {
     .select('day,total,by_violation,by_action')
     .eq('chat_id', String(chatId))
     .gte('day', sinceStr)
+    .order('day', { ascending: true });
+  const agg = { total: 0, byViolation: {}, byAction: {} };
+  for (const row of data || []) {
+    agg.total += row.total || 0;
+    for (const [k, v] of Object.entries(row.by_violation || {})) inc(agg.byViolation, k, v);
+    for (const [k, v] of Object.entries(row.by_action || {})) inc(agg.byAction, k, v);
+  }
+  return agg;
+}
+
+// Convenience ranges for group stats
+export async function getGroupMonthlyStats(chatId) {
+  return getGroupStatsPeriod(chatId, 30);
+}
+
+export async function getGroupYearlyStats(chatId) {
+  return getGroupStatsPeriod(chatId, 365);
+}
+
+export async function getGroupLifetimeStats(chatId) {
+  const sb = getSupabase();
+  if (!sb) {
+    // Fallback: aggregate from in-memory recent logs
+    const agg = { total: 0, byViolation: {}, byAction: {} };
+    try {
+      const cid = String(chatId);
+      for (const row of recentLogs) {
+        if (String(row.chat?.id || '') !== cid) continue;
+        agg.total += 1;
+        inc(agg.byViolation, row.violation || '-');
+        inc(agg.byAction, row.action || 'action');
+      }
+    } catch {}
+    return agg;
+  }
+  const { data } = await sb
+    .from('stats_chat_daily')
+    .select('day,total,by_violation,by_action')
+    .eq('chat_id', String(chatId))
     .order('day', { ascending: true });
   const agg = { total: 0, byViolation: {}, byAction: {} };
   for (const row of data || []) {
@@ -314,6 +389,15 @@ export async function getUserStatsPeriod(userId, chatId, days = 7) {
     for (const [k, v] of Object.entries(row.by_action || {})) inc(agg.byAction, k, v);
   }
   return agg;
+}
+
+// Convenience ranges for user stats
+export async function getUserMonthlyStats(userId, chatId) {
+  return getUserStatsPeriod(userId, chatId, 30);
+}
+
+export async function getUserYearlyStats(userId, chatId) {
+  return getUserStatsPeriod(userId, chatId, 365);
 }
 
 export async function getUserLifetimeStats(userId, chatId) {
