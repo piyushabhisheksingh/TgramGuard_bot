@@ -171,6 +171,14 @@ async function mentionWithPrefix(ctx, user, currentViolation) {
   return `${pref}${mentionHTML(user)}`;
 }
 
+async function mentionPlainWithPrefix(ctx, user, currentViolation) {
+  const pref = await userPrefix(ctx, user, currentViolation);
+  const id = user?.id ?? '?';
+  const name = [user?.first_name, user?.last_name].filter(Boolean).join(' ') || 'user';
+  const escName = escapeHtml(name);
+  return `${pref}${escName} [${id}]`;
+}
+
 // Conditional funny suffix based on settings: can be toggled globally or per chat
 async function maybeSuffix(ctx, violation = 'default') {
   try {
@@ -366,7 +374,7 @@ export function securityMiddleware() {
             : bioHasLink
             ? 'a link'
             : 'explicit content';
-          await notifyAndCleanup(ctx, `${await mentionWithPrefix(ctx, ctx.from, 'bio_block')} cannot post because your bio contains ${reason}. Please update your bio to participate.${await maybeSuffix(ctx, 'bio_block')}`);
+          await notifyAndCleanup(ctx, `${await mentionPlainWithPrefix(ctx, ctx.from, 'bio_block')} cannot post because your bio contains ${reason}. Please update your bio to participate.${await maybeSuffix(ctx, 'bio_block')}`);
           await logAction(ctx, { action: 'delete_message', action_type: 'moderation', violation: 'bio_block', user: ctx.from, chat: ctx.chat, content: bioText ? `[BIO] ${bioText}` : '' });
         } catch (_) {}
         }
