@@ -516,8 +516,8 @@ export async function logAction(ctxOrApi, details = {}) {
     const sent = await api.sendMessage(LOG_CHAT_ID, html, { parse_mode: 'HTML', disable_web_page_preview: true, reply_markup: replyMarkup });
     // Update in-memory stats after successful log
     recordStats({ action, violation }, chat);
-    // Persist daily counters to Supabase (best-effort)
-    await recordStatsSupabase({ action, violation }, chat);
+    // Persist daily counters to Supabase (best-effort). Include user for per-user stats.
+    await recordStatsSupabase({ action, violation, user }, chat);
     // Keep recent logs for UI
     try {
       const entry = {
@@ -537,7 +537,7 @@ export async function logAction(ctxOrApi, details = {}) {
   } catch (_) {
     // Even if sending fails, attempt to record stats locally
     recordStats({ action, violation }, chat);
-    await recordStatsSupabase({ action, violation }, chat);
+    await recordStatsSupabase({ action, violation, user }, chat);
     try {
       const entry = {
         ts: new Date().toISOString(),
