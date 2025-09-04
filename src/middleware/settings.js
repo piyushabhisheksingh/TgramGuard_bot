@@ -18,7 +18,8 @@ import {
   getChatMaxLen,
 } from '../store/settings.js';
 import { consumeReview } from '../logger.js';
-import { addSafeTerms } from '../filters/customTerms.js';
+import { addSafeTerms, addExplicitTerms } from '../filters/customTerms.js';
+import { addExplicitRuntime } from '../filters.js';
 
 // Utilities shared with security middleware (re-implemented minimal)
 async function isChatAdminWithBan(ctx, userId) {
@@ -232,6 +233,51 @@ export function settingsMiddleware() {
     const added = await addSafeTerms(cands);
     try { await ctx.editMessageReplyMarkup({ inline_keyboard: [] }); } catch {}
     return ctx.answerCallbackQuery({ text: added ? `Added ${added} term(s) to safelist` : 'No suitable terms found', show_alert: false });
+  });
+
+  // -------- /abuse command: add explicit phrases/words --------
+  function parseQuoted(input = '') {
+    const out = [];
+    const re = /"([^"]{2,100})"|'([^']{2,100})'|([^,\n]{2,100})/g;
+    let m;
+    while ((m = re.exec(input))) {
+      const s = (m[1] || m[2] || m[3] || '').trim();
+      if (s) out.push(s);
+      if (out.length >= 10) break;
+    }
+    return out.map((s) => s.trim()).filter(Boolean);
+  }
+
+  composer.command('abuse', async (ctx) => {
+    if (!(await isBotAdminOrOwner(ctx))) return ctx.reply('Admins only.');
+    const args = ctx.match || '';
+    let candidates = parseQuoted(args);
+    if ((!candidates || !candidates.length) && ctx.msg?.reply_to_message) {
+      const rep = ctx.msg.reply_to_message;
+      const text = rep.text || rep.caption || '';
+      // Heuristic: extract tokens with risky substrings
+      const risky = ['ass','cum','cock','dick','tit','shit','sex','gand','lund','chut','jhant','jhaat','jhat'];
+      const tokens = String(text)
+        .split(/[^\p{L}\p{N}@#._-]+/u)
+        .map((t) => t.trim())
+        .filter((t) => t.length >= 3 && t.length <= 50);
+      const seen = new Set();
+      for (const t of tokens) {
+        const low = t.toLowerCase();
+        if (!risky.some((r) => low.includes(r))) continue;
+        if (seen.has(low)) continue;
+        seen.add(low);
+        candidates.push(t);
+        if (candidates.length >= 10) break;
+      }
+    }
+    if (!candidates.length) {
+      return ctx.reply('Usage: /abuse "word or phrase" (or reply to a message with /abuse)');
+    }
+    // Apply at runtime and persist
+    addExplicitRuntime(candidates);
+    const added = await addExplicitTerms(candidates);
+    return ctx.reply(`Added ${added} phrase(s) to explicit list.`);
   });
 
   async function buildUserStatsMessage(ctx, targetId, scope = 'chat', format = 'pretty') {

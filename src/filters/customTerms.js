@@ -216,6 +216,30 @@ export function addSafeTermNormalized(term = '') {
   return true;
 }
 
+// Add explicit phrases/words (persist to file and Supabase, and let callers update runtime)
+export async function addExplicitTerms(terms = []) {
+  const DATA_DIR = path.join(process.cwd(), 'data');
+  const TXT_FILE = path.join(DATA_DIR, 'explicit_terms_custom.txt');
+  const rows = [];
+  let added = 0;
+  for (const t of terms) {
+    const raw = String(t || '').trim();
+    if (!raw) continue;
+    try { fs.appendFileSync(TXT_FILE, `${raw}\n`); } catch {}
+    rows.push({ pattern: raw, created_at: new Date().toISOString() });
+    added++;
+  }
+  try {
+    const sb = getSupabase();
+    if (sb && rows.length) {
+      const table = process.env.EXPLICIT_TERMS_TABLE || 'explicit_terms';
+      // store under column 'pattern'
+      await sb.from(table).upsert(rows, { onConflict: 'pattern' });
+    }
+  } catch {}
+  return added;
+}
+
 // Batch add terms and persist to Supabase (best-effort), used by review UI
 export async function addSafeTerms(terms = []) {
   const rows = [];

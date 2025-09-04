@@ -24,14 +24,15 @@ export function containsExplicit(text = "") {
   if (!text) return false;
   // Fast path on raw text
   if (explicitTerms.some((rx) => rx.test(text))) return true;
+  if (runtimeExplicit.some((rx) => rx.test(text))) return true;
   // Optional: token-based profanity check via `allprofanity` package if installed
   if (hasProfanityToken(text)) return true;
   // Obfuscation-aware path: normalize text and run a looser check
   const normalized = normalizeForExplicit(text);
-  if (!explicitTermsLoose.some((rx) => rx.test(normalized))) return false;
+  if (!explicitTermsLoose.some((rx) => rx.test(normalized)) && !runtimeExplicitLoose.some((rx) => rx.test(normalized))) return false;
   // Strip safe segments and retest to reduce false positives
   const stripped = stripSafeSegments(normalized);
-  return explicitTermsLoose.some((rx) => rx.test(stripped));
+  return explicitTermsLoose.some((rx) => rx.test(stripped)) || runtimeExplicitLoose.some((rx) => rx.test(stripped));
 }
 
 export function overCharLimit(text = "", limit = 200) {
@@ -49,6 +50,39 @@ const explicitTermsLoose = explicitTerms.map((rx) => {
   // Preserve unicode flag if present
   return new RegExp(src, flags);
 });
+
+// --- Runtime additions for explicit patterns (via /abuse) ---
+const runtimeExplicit = [];
+const runtimeExplicitLoose = [];
+export function addExplicitRuntime(terms = []) {
+  let added = 0;
+  for (const t of terms) {
+    if (!t) continue;
+    // Allow /pattern/flags or plain strings
+    let rx = null;
+    if (typeof t === 'string') {
+      const m = t.match(/^\s*\/(.*)\/([a-z]*)\s*$/i);
+      if (m) {
+        try { rx = new RegExp(m[1], m[2] || 'i'); } catch { rx = null; }
+      }
+      if (!rx) {
+        const esc = t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        rx = new RegExp(`\\b${esc}\\b`, 'i');
+      }
+    } else if (t instanceof RegExp) {
+      rx = t;
+    }
+    if (!rx) continue;
+    runtimeExplicit.push(rx);
+    // Build loose version for normalized scanning
+    const looseSrc = rx.source.replace(/\\b/g, '');
+    let flags = rx.flags || '';
+    if (!flags.includes('i')) flags += 'i';
+    try { runtimeExplicitLoose.push(new RegExp(looseSrc, flags)); } catch {}
+    added++;
+  }
+  return added;
+}
 
 function normalizeForExplicit(input = '') {
   // Lowercase
