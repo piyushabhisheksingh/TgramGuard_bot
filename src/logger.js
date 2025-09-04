@@ -81,6 +81,22 @@ export function getGroupStats(chatId) {
   };
 }
 
+// --- Recent logs ring buffer (for UI) ---
+const RECENT_CAP = Number(process.env.RECENT_LOGS_CAP || 1000);
+const recentLogs = [];
+
+export function getRecentLogs(limit = 100, chatId = null) {
+  const n = Math.max(1, Math.min(Number(limit) || 100, 500));
+  if (chatId == null) return recentLogs.slice(0, n);
+  const cid = String(chatId);
+  const out = [];
+  for (const row of recentLogs) {
+    if (row.chat?.id === cid) out.push(row);
+    if (out.length >= n) break;
+  }
+  return out;
+}
+
 function recordStats(details, chat) {
   const v = details.violation || '-';
   const a = details.action || 'action';
@@ -97,6 +113,7 @@ function recordStats(details, chat) {
 
 // ---------- Supabase persistence for stats ----------
 import { getSupabase } from './store/supabase.js';
+import crypto from 'node:crypto';
 
 function dayKey(d = new Date()) {
   const y = d.getUTCFullYear();
@@ -181,6 +198,55 @@ async function recordStatsSupabase(details, chat) {
   } catch {
     // ignore persistence errors
   }
+}
+
+// Optional Supabase-backed logs reader if a table exists
+export async function getRecentLogsSupabase(limit = 100, chatId = null) {
+  const sb = getSupabase();
+  if (!sb) return null;
+  const table = process.env.LOGS_TABLE || 'moderation_logs';
+  try {
+    let q = sb
+      .from(table)
+      .select('ts,created_at,action,action_type,violation,chat_id,chat_title,chat_username,user_id,user_first_name,user_last_name,user_username,content,group_link')
+      .order('ts', { ascending: false })
+      .limit(Math.max(1, Math.min(Number(limit) || 100, 500)));
+    if (chatId != null) q = q.eq('chat_id', String(chatId));
+    const { data, error } = await q;
+    if (error) return null;
+    const rows = (data || []).map((r) => ({
+      ts: r.ts || r.created_at || new Date().toISOString(),
+      action: r.action,
+      actionType: r.action_type,
+      violation: r.violation,
+      chat: { id: String(r.chat_id || ''), title: r.chat_title, username: r.chat_username },
+      user: r.user_id ? { id: Number(r.user_id), first_name: r.user_first_name, last_name: r.user_last_name, username: r.user_username } : undefined,
+      content: r.content || '',
+      group_link: r.group_link,
+    }));
+    return rows;
+  } catch {
+    return null;
+  }
+}
+
+// --- Inline review support for explicit detections ---
+const REVIEW_TTL_MS = Number(process.env.EXPLICIT_REVIEW_TTL_MS || 6 * 60 * 60 * 1000); // 6h
+const reviewStore = new Map(); // id -> { until, text }
+
+function createReview(text) {
+  const id = crypto.randomUUID?.() || Math.random().toString(36).slice(2);
+  const until = Date.now() + REVIEW_TTL_MS;
+  reviewStore.set(id, { until, text: String(text || '').slice(0, 4000) });
+  return id;
+}
+
+export function consumeReview(id) {
+  const entry = reviewStore.get(id);
+  if (!entry) return null;
+  reviewStore.delete(id);
+  if (entry.until < Date.now()) return null;
+  return entry;
 }
 
 export async function getBotStatsPeriod(days = 1) {
@@ -436,16 +502,56 @@ export async function logAction(ctxOrApi, details = {}) {
 
   const html = lines.join('\n');
   try {
-    const sent = await api.sendMessage(LOG_CHAT_ID, html, { parse_mode: 'HTML', disable_web_page_preview: true });
+    // Attach inline review buttons for explicit detections
+    let replyMarkup;
+    if (violation === 'no_explicit' || violation === 'name_no_explicit') {
+      const rid = createReview(contentRaw);
+      replyMarkup = {
+        inline_keyboard: [[
+          { text: 'Valid ✅', callback_data: `rv:ok:${rid}` },
+          { text: 'Invalid — Safelist', callback_data: `rv:bad:${rid}` },
+        ]],
+      };
+    }
+    const sent = await api.sendMessage(LOG_CHAT_ID, html, { parse_mode: 'HTML', disable_web_page_preview: true, reply_markup: replyMarkup });
     // Update in-memory stats after successful log
     recordStats({ action, violation }, chat);
     // Persist daily counters to Supabase (best-effort)
     await recordStatsSupabase({ action, violation }, chat);
+    // Keep recent logs for UI
+    try {
+      const entry = {
+        ts: new Date().toISOString(),
+        action,
+        actionType,
+        violation,
+        chat: { id: String(chat?.id ?? ''), title: chat?.title, username: chat?.username },
+        user: user ? { id: user.id, first_name: user.first_name, last_name: user.last_name, username: user.username } : undefined,
+        content: contentRaw || '',
+        group_link: groupLink,
+      };
+      recentLogs.unshift(entry);
+      if (recentLogs.length > RECENT_CAP) recentLogs.length = RECENT_CAP;
+    } catch {}
     return sent;
   } catch (_) {
     // Even if sending fails, attempt to record stats locally
     recordStats({ action, violation }, chat);
     await recordStatsSupabase({ action, violation }, chat);
+    try {
+      const entry = {
+        ts: new Date().toISOString(),
+        action,
+        actionType,
+        violation,
+        chat: { id: String(chat?.id ?? ''), title: chat?.title, username: chat?.username },
+        user: user ? { id: user.id, first_name: user.first_name, last_name: user.last_name, username: user.username } : undefined,
+        content: contentRaw || '',
+        group_link: groupLink,
+      };
+      recentLogs.unshift(entry);
+      if (recentLogs.length > RECENT_CAP) recentLogs.length = RECENT_CAP;
+    } catch {}
     return undefined;
   }
 }

@@ -17,6 +17,8 @@ import {
   getChatRules,
   getChatMaxLen,
 } from '../store/settings.js';
+import { consumeReview } from '../logger.js';
+import { addSafeTerms } from '../filters/customTerms.js';
 
 // Utilities shared with security middleware (re-implemented minimal)
 async function isChatAdminWithBan(ctx, userId) {
@@ -192,6 +194,45 @@ export function settingsMiddleware() {
       ],
     };
   }
+
+  // -------- Review callbacks for explicit detections --------
+  function extractSafeCandidates(text = '') {
+    const risky = ['ass','cum','cock','dick','tit','shit','sex','gand','lund','chut','jhant','jhaat','jhat'];
+    const tokens = String(text)
+      .split(/[^\p{L}\p{N}@#._-]+/u)
+      .map((t) => t.trim())
+      .filter((t) => t.length >= 3 && t.length <= 50);
+    const out = [];
+    const seen = new Set();
+    for (const t of tokens) {
+      const low = t.toLowerCase();
+      if (!risky.some((r) => low.includes(r))) continue;
+      if (seen.has(low)) continue;
+      seen.add(low);
+      out.push(t);
+      if (out.length >= 5) break; // avoid spamming
+    }
+    return out;
+  }
+
+  composer.callbackQuery(/^rv:(ok|bad):([A-Za-z0-9_-]+)$/i, async (ctx) => {
+    if (!(await isBotAdminOrOwner(ctx))) return ctx.answerCallbackQuery({ text: 'Admins only', show_alert: true });
+    const [, kind, id] = ctx.match;
+    const review = consumeReview(id);
+    if (!review) {
+      try { await ctx.editMessageReplyMarkup({ inline_keyboard: [] }); } catch {}
+      return ctx.answerCallbackQuery({ text: 'Review expired', show_alert: false });
+    }
+    if (kind === 'ok') {
+      try { await ctx.editMessageReplyMarkup({ inline_keyboard: [] }); } catch {}
+      return ctx.answerCallbackQuery({ text: 'Marked valid', show_alert: false });
+    }
+    // bad -> add safelist candidates
+    const cands = extractSafeCandidates(review.text);
+    const added = await addSafeTerms(cands);
+    try { await ctx.editMessageReplyMarkup({ inline_keyboard: [] }); } catch {}
+    return ctx.answerCallbackQuery({ text: added ? `Added ${added} term(s) to safelist` : 'No suitable terms found', show_alert: false });
+  });
 
   async function buildUserStatsMessage(ctx, targetId, scope = 'chat', format = 'pretty') {
     const mod = await import('../logger.js');

@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
+import { getSupabase } from '../store/supabase.js';
 
 function escapeRegex(s = '') {
   return String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -174,3 +175,70 @@ export const customSafePatternsNormalized = [
   ...buildSafeFromList(loadModuleWordlist('wordlist-english')),
   ...buildSafeFromList(loadModuleWordlist('wordlist-english/english-words')),
 ];
+
+// Hydrate additional safelist terms from Supabase, if configured
+async function loadSafeSupabase() {
+  try {
+    const sb = getSupabase();
+    if (!sb) return;
+    const table = process.env.SAFE_TERMS_TABLE || 'safe_terms';
+    const { data, error } = await sb
+      .from(table)
+      .select('term,created_at')
+      .order('created_at', { ascending: false })
+      .limit(5000);
+    if (error) return;
+    for (const row of data || []) {
+      const term = String(row.term || '').trim();
+      if (!term) continue;
+      try {
+        const rx = new RegExp(escapeRegex(normalizeLite(term)), 'gi');
+        customSafePatternsNormalized.push(rx);
+      } catch {}
+    }
+  } catch {}
+}
+
+try { await loadSafeSupabase(); } catch {}
+
+// Runtime addition: append a safelist term
+export function addSafeTermNormalized(term = '') {
+  const raw = String(term || '').trim();
+  if (!raw) return false;
+  const n = normalizeLite(raw);
+  if (!n) return false;
+  try {
+    const rx = new RegExp(escapeRegex(n), 'gi');
+    customSafePatternsNormalized.push(rx);
+  } catch {}
+  // Best-effort persist to SAFE_TXT so it survives restarts
+  try { fs.appendFileSync(SAFE_TXT, `${raw}\n`); } catch {}
+  return true;
+}
+
+// Batch add terms and persist to Supabase (best-effort), used by review UI
+export async function addSafeTerms(terms = []) {
+  const rows = [];
+  let added = 0;
+  for (const t of terms) {
+    const raw = String(t || '').trim();
+    if (!raw) continue;
+    const n = normalizeLite(raw);
+    if (!n) continue;
+    try {
+      const rx = new RegExp(escapeRegex(n), 'gi');
+      customSafePatternsNormalized.push(rx);
+      added++;
+    } catch {}
+    try { fs.appendFileSync(SAFE_TXT, `${raw}\n`); } catch {}
+    rows.push({ term: raw, created_at: new Date().toISOString() });
+  }
+  try {
+    const sb = getSupabase();
+    if (sb && rows.length) {
+      const table = process.env.SAFE_TERMS_TABLE || 'safe_terms';
+      await sb.from(table).upsert(rows, { onConflict: 'term' });
+    }
+  } catch {}
+  return added;
+}
