@@ -248,6 +248,55 @@ export function settingsMiddleware() {
     return ctx.answerCallbackQuery({ text: msg, show_alert: false });
   });
 
+  // -------- Safelist suggestions (auto from logs) --------
+  const suggStore = new Map(); // id -> { until, terms: string[] }
+  const SUGG_TTL_MS = 15 * 60 * 1000;
+
+  composer.command('safelist_suggest', async (ctx) => {
+    if (!(await isBotAdminOrOwner(ctx))) return ctx.reply('Admins only');
+    const parts = String(ctx.match || '').trim().split(/\s+/).filter(Boolean);
+    const scope = (parts[0] || 'chat').toLowerCase();
+    const limit = Number(parts[1] || 20) || 20;
+    const chatScope = scope === 'global' ? null : ctx.chat?.id;
+    try {
+      const mod = await import('../logger.js');
+      const list = await mod.getSafeSuggestions({ chatId: chatScope, limit, horizon: 800 });
+      if (!list.length) return ctx.reply('No suggestions found.');
+      const id = Math.random().toString(36).slice(2);
+      const until = Date.now() + SUGG_TTL_MS;
+      suggStore.set(id, { until, terms: list.map((x) => x.term) });
+      const lines = list.map((x) => `• <code>${esc(x.term)}</code> — <b>${x.count}</b>`).join('\n');
+      const kb = {
+        inline_keyboard: [
+          [ { text: 'Safelist Top 5', callback_data: `sfs:add:${id}:5:${scope}` }, { text: 'Top 10', callback_data: `sfs:add:${id}:10:${scope}` } ],
+          [ { text: 'Safelist All', callback_data: `sfs:add:${id}:all:${scope}` } ],
+        ],
+      };
+      return ctx.reply([
+        `<b>Safelist Suggestions (${scope})</b>`,
+        lines,
+        '',
+        `<i>Tap a button to add these words${scope==='global' ? ' globally' : ' for this chat (persisted globally)'}.</i>`,
+      ].join('\n'), { parse_mode: 'HTML', reply_markup: kb, disable_web_page_preview: true });
+    } catch (e) {
+      return ctx.reply('Failed to build suggestions.');
+    }
+  });
+
+  composer.callbackQuery(/^sfs:add:([A-Za-z0-9_-]+):(\d+|all):(chat|global)$/i, async (ctx) => {
+    if (!(await isBotAdminOrOwner(ctx))) return ctx.answerCallbackQuery({ text: 'Admins only', show_alert: true });
+    const [, id, countStr, scope] = ctx.match;
+    const row = suggStore.get(id);
+    if (!row || row.until < Date.now()) {
+      try { await ctx.editMessageReplyMarkup({ inline_keyboard: [] }); } catch {}
+      return ctx.answerCallbackQuery({ text: 'Suggestions expired', show_alert: false });
+    }
+    const terms = row.terms.slice(0, countStr === 'all' ? row.terms.length : Number(countStr || 0));
+    const { added, persisted, dbError } = await addSafeTerms(terms);
+    try { await ctx.editMessageReplyMarkup({ inline_keyboard: [] }); } catch {}
+    return ctx.answerCallbackQuery({ text: added ? `Safelisted ${added} term(s)${persisted ? ' · DB saved' : dbError ? ' · DB error' : ''}` : 'No terms added', show_alert: false });
+  });
+
   // -------- /abuse command: add explicit phrases/words --------
   function parseQuoted(input = '') {
     const out = [];

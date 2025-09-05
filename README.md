@@ -63,6 +63,7 @@ Admin commands
 - Group owner/admin (with ban rights), bot admin or owner: `/rule_chat_enable <rule>`, `/rule_chat_disable <rule>`
 - Group owner/admin (with ban rights), bot admin or owner: `/maxlen_chat_set <n>`
 - Group owner/admin (with ban rights), bot admin or owner: `/whitelist_add <user_id>`, `/whitelist_remove <user_id>`, `/whitelist_list`
+- Bot admin or owner: `/safelist_suggest [chat|global] [limit]` — show auto-suggested safelist words from recent logs and add with buttons
 
 Rules keys
 - `no_edit`, `max_len`, `no_links`, `no_explicit`, `bio_block`
