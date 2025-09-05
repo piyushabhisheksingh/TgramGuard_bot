@@ -2,32 +2,23 @@
 # One term per line; comments start with '#'
 
 # 'ass'
-assistant
-assistance
-assignment
-passenger
-passage
 
-# 'shit' name-like collisions
 akshita
-nishita
-harshita
-
-# 'cum'
-cumulative
-succumb
-document
-
-# 'tit'
-titanium
-titular
-titania
-
-# 'cock'
-peacock
+assignment
+assistance
+assistant
 cockpit
-
-# 'dick'
+cumulative
 dickens
 dickinson
+document
+harshita
+nishita
+passage
+passenger
+peacock
 riddick
+succumb
+titania
+titanium
+titular

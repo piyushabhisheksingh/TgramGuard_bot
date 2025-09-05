@@ -2,23 +2,18 @@
 # One term per line; comments start with '#'
 
 # 'gand' collisions (benign forms/uses)
+
+accumulate
+assignment
+assistant
+cumulative
 gandhar
 gandharv
 gandharva
 gandhi
-
-# 'ass' benign usages (English loans/common)
-assistant
-assignment
 passable
 passionate
-
-# 'tit' benign
-titular
+succumb
 tithi
 titli
-
-# 'cum' benign (loan/academic)
-cumulative
-accumulate
-succumb
+titular

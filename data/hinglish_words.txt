@@ -2,35 +2,26 @@
 # One term per line; comments start with '#'
 
 # 'ass' collisions
+
+accumulation
+akshita
 assam
 assamese
-passenger
-passbook
-
-# 'shit' name-like collisions
-akshita
-lakshit
-harshit
-darshita
-
-# 'tit' benign
-titular
-titanium
-titiksha
-
-# 'cum' benign
-succumb
 cumulative
-accumulation
-
-# 'gand' benign
+darshita
 gandhar
 gandharv
 gandharva
 gandhi
-randhir
-randhawa
-
-# 'dick' benign
-riddick
+harshit
 hendrick
+lakshit
+passbook
+passenger
+randhawa
+randhir
+riddick
+succumb
+titanium
+titiksha
+titular
