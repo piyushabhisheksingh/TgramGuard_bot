@@ -237,8 +237,8 @@ export function settingsMiddleware() {
       const phrase = String(review.text || '').slice(0, 160).trim();
       if (phrase) cands = [phrase];
     } else if (kind === 'addw') {
-      // Safelist risky tokens from phrase
-      cands = extractRiskyTokens(review.text, 20);
+      // Safelist only risky tokens from the phrase
+      cands = extractRiskyTokens(review.text, 50);
     }
     const { added, persisted, dbError } = await addSafeTerms(cands);
     try { await ctx.editMessageReplyMarkup({ inline_keyboard: [] }); } catch {}

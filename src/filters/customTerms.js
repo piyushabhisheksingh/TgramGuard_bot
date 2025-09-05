@@ -182,14 +182,28 @@ async function loadSafeSupabase() {
     const sb = getSupabase();
     if (!sb) return;
     const table = process.env.SAFE_TERMS_TABLE || 'safe_terms';
-    const { data, error } = await sb
-      .from(table)
-      .select('term,created_at')
-      .order('created_at', { ascending: false })
-      .limit(5000);
-    if (error) return;
-    for (const row of data || []) {
-      const term = String(row.term || '').trim();
+    // Try primary expected schema (term). If that fails, fall back to `pattern` for legacy tables.
+    let rows = [];
+    try {
+      const { data, error } = await sb
+        .from(table)
+        .select('term,created_at')
+        .order('created_at', { ascending: false })
+        .limit(5000);
+      if (!error) rows = data || [];
+    } catch {}
+    if (!rows.length) {
+      try {
+        const { data, error } = await sb
+          .from(table)
+          .select('pattern,created_at')
+          .order('created_at', { ascending: false })
+          .limit(5000);
+        if (!error) rows = data || [];
+      } catch {}
+    }
+    for (const row of rows) {
+      const term = String(row.term ?? row.pattern ?? '').trim();
       if (!term) continue;
       try {
         const rx = new RegExp(escapeRegex(normalizeLite(term)), 'gi');
@@ -242,7 +256,7 @@ export async function addExplicitTerms(terms = []) {
 
 // Batch add terms and persist to Supabase (best-effort), used by review UI
 export async function addSafeTerms(terms = []) {
-  const rows = [];
+  const rowsTerm = [];
   let added = 0;
   for (const t of terms) {
     const raw = String(t || '').trim();
@@ -255,26 +269,75 @@ export async function addSafeTerms(terms = []) {
       added++;
     } catch {}
     try { fs.appendFileSync(SAFE_TXT, `${raw}\n`); } catch {}
-    rows.push({ term: raw, created_at: new Date().toISOString() });
+    rowsTerm.push({ term: raw, created_at: new Date().toISOString() });
   }
   let persisted = 0;
   let dbError = null;
   try {
     const sb = getSupabase();
-    if (sb && rows.length) {
+    if (sb && rowsTerm.length) {
       const table = process.env.SAFE_TERMS_TABLE || 'safe_terms';
-      const { data, error } = await sb.from(table).upsert(rows, { onConflict: 'term' }).select('term');
-      if (error) {
-        dbError = error.message || String(error);
-        // Log once for visibility
-        console.warn('[safe_terms] upsert failed:', dbError);
-      } else {
-        persisted = Array.isArray(data) ? data.length : rows.length;
+      // Try preferred schema: column `term` with unique constraint
+      let ok = false;
+      try {
+        const { data, error } = await sb
+          .from(table)
+          .upsert(rowsTerm, { onConflict: 'term' })
+          .select('term');
+        if (!error) {
+          persisted = Array.isArray(data) ? data.length : rowsTerm.length;
+          ok = true;
+        } else {
+          dbError = error.message || String(error);
+          console.warn('[safe_terms] upsert(term) failed:', dbError);
+        }
+      } catch (e) {
+        dbError = e?.message || String(e);
+        console.warn('[safe_terms] upsert(term) threw:', dbError);
+      }
+      // Fallback 1: legacy schema uses column `pattern`
+      if (!ok) {
+        const rowsPattern = rowsTerm.map((r) => ({ pattern: r.term, created_at: r.created_at }));
+        try {
+          const { data, error } = await sb
+            .from(table)
+            .upsert(rowsPattern, { onConflict: 'pattern' })
+            .select('pattern');
+          if (!error) {
+            persisted = Array.isArray(data) ? data.length : rowsPattern.length;
+            ok = true;
+          } else {
+            dbError = error.message || String(error);
+            console.warn('[safe_terms] upsert(pattern) failed:', dbError);
+          }
+        } catch (e) {
+          dbError = e?.message || String(e);
+          console.warn('[safe_terms] upsert(pattern) threw:', dbError);
+        }
+      }
+      // Fallback 2: plain insert without onConflict (may create duplicates but ensures persistence)
+      if (!ok) {
+        try {
+          const { data, error } = await sb
+            .from(table)
+            .insert(rowsTerm)
+            .select();
+          if (!error) {
+            persisted = Array.isArray(data) ? data.length : rowsTerm.length;
+            ok = true;
+          } else {
+            dbError = error.message || String(error);
+            console.warn('[safe_terms] insert(term) failed:', dbError);
+          }
+        } catch (e) {
+          dbError = e?.message || String(e);
+          console.warn('[safe_terms] insert(term) threw:', dbError);
+        }
       }
     }
   } catch (e) {
     dbError = e?.message || String(e);
-    console.warn('[safe_terms] upsert threw:', dbError);
+    console.warn('[safe_terms] persistence error:', dbError);
   }
   return { added, persisted, dbError };
 }
