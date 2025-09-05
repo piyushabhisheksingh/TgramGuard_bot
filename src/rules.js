@@ -17,5 +17,5 @@ export const DEFAULT_RULES = {
 };
 
 export const DEFAULT_LIMITS = {
-  max_len: 200,
+  max_len: 300,
 };

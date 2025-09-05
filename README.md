@@ -2,7 +2,7 @@
 
 A Telegram group security bot built with grammY that enforces:
 
-- Max message length of 200 characters
+- Max message length of 300 characters
 - No message edits (edited messages are deleted)
 - No sexual/explicit content (applies to messages and media captions)
 - No links of any kind (including Telegram links; applies to messages and media captions)
@@ -39,7 +39,7 @@ npm start
 - Listens to `message` and `edited_message` updates.
 - Deletes edited messages immediately and posts a short-lived notice.
 - Checks message text or caption for:
-  - Character length > 200
+  - Character length > 300
   - Links (via Telegram entities and regex)
   - Sexual/explicit terms (keyword list)
 - Before allowing any post, checks the sender's bio (`getChat(userId)`) for links.
@@ -68,8 +68,8 @@ Rules keys
 - `no_edit`, `max_len`, `no_links`, `no_explicit`, `bio_block`
 
 Limits
-- `max_len` limit defaults to 200 characters.
-- Set global limit: `/maxlen_global_set 200`
+- `max_len` limit defaults to 300 characters.
+  - Set global limit: `/maxlen_global_set 300`
 - Set per-chat limit: `/maxlen_chat_set 150`
 
 ## Customization

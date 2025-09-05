@@ -383,7 +383,7 @@ export function securityMiddleware() {
       }
     }
 
-    // Rule 1: Max length 200
+    // Rule 1: Max length (default 300)
     if (await isRuleEnabled('max_len', ctx.chat.id)) {
       const limit = await getEffectiveMaxLen(ctx.chat.id);
       if (overCharLimit(text, limit)) {
