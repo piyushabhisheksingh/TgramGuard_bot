@@ -316,6 +316,15 @@ export function securityMiddleware() {
     // Extract text/caption and entities
     const text = msg.text ?? msg.caption ?? '';
     const entities = msg.entities ?? msg.caption_entities ?? [];
+    // Extract poll contents (question + options) for explicit checks
+    let pollText = '';
+    if (msg.poll) {
+      try {
+        const q = String(msg.poll.question || '');
+        const opts = Array.isArray(msg.poll.options) ? msg.poll.options.map((o) => o?.text).filter(Boolean) : [];
+        pollText = [q, ...opts].filter(Boolean).join(' \n ');
+      } catch {}
+    }
 
     // Display name checks (apply existing rules to member's name)
     // Build a display name string from first/last/username
@@ -415,7 +424,7 @@ export function securityMiddleware() {
     }
 
     // Rule 3: No explicit content
-    if ((await isRuleEnabled('no_explicit', ctx.chat.id)) && containsExplicit(text)) {
+    if ((await isRuleEnabled('no_explicit', ctx.chat.id)) && containsExplicit(text || pollText)) {
       if (await ensureBotCanDelete(ctx)) {
         try {
           await ctx.api.deleteMessage(ctx.chat.id, msg.message_id);
@@ -423,7 +432,8 @@ export function securityMiddleware() {
             ctx,
             `${await mentionWithPrefix(ctx, ctx.from, 'no_explicit')} explicit or sexual content is not allowed.${await maybeSuffix(ctx, 'no_explicit')}`
           );
-          await logAction(ctx, { action: 'delete_message', action_type: 'moderation', violation: 'no_explicit', user: ctx.from, chat: ctx.chat, content: text });
+          const contentStr = text || (pollText ? `[POLL] ${pollText}` : '');
+          await logAction(ctx, { action: 'delete_message', action_type: 'moderation', violation: 'no_explicit', user: ctx.from, chat: ctx.chat, content: contentStr });
         } catch (_) {}
       }
       return;
