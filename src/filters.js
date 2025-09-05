@@ -193,7 +193,11 @@ function loadAllProfanitySet() {
 function hasProfanityToken(text = '') {
   const set = loadAllProfanitySet();
   if (!set) return false;
-  const tokens = String(text).toLowerCase().split(/[^a-z]+/).filter(Boolean);
+  // Ignore very short English tokens (<=2 chars) to avoid false positives
+  const tokens = String(text)
+    .toLowerCase()
+    .split(/[^a-z]+/)
+    .filter((t) => t && t.length >= 3);
   for (const t of tokens) if (set.has(t)) return true;
   return false;
 }
