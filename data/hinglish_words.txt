@@ -1,0 +1,34 @@
+# Add common Hinglish words/phrases that may collide with risky substrings
+# One term per line; comments start with '#'
+
+# 'ass' collisions
+assam
+assamese
+passenger
+passbook
+
+# 'shit' name-like collisions
+akshita
+lakshit
+harshit
+darshita
+
+# 'tit' benign
+titular
+titanium
+titiksha
+
+# 'cum' benign
+succumb
+cumulative
+accumulation
+
+# 'gand' benign
+gandhar
+gandharv
+gandharva
+gandhi
+
+# 'dick' benign
+riddick
+hendrick

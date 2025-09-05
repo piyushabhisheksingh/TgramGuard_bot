@@ -78,6 +78,19 @@ Limits
 - Adjust notice TTL in `notifyAndCleanup` within `src/bot.js`.
 - Change max length in `overCharLimit` usage.
 
+### Dictionaries for Safewords (Hindi/English/Hinglish)
+
+- The bot uses a safelist to reduce false positives during explicit-content detection. You can now leverage dictionary wordlists to auto-safelist benign words that collide with risky substrings (e.g., ass, shit, tit, cum, gand, cock, dick).
+- Add terms (one per line) to any of these optional files under `data/`:
+  - `data/english_words.txt`
+  - `data/hindi_words.txt` (romanized or English words used in Hindi contexts)
+  - `data/hinglish_words.txt`
+- Only words that actually contain risky substrings are safelisted (to avoid over-safelisting). The bot normalizes text (lowercase, diacritics stripped, punctuation removed) and strips these safewords before checking explicit patterns.
+- You can still use:
+  - `data/safe_terms_custom.txt` and `data/safe_terms_custom.json` for arbitrary safelist terms/phrases.
+  - `data/indian_names.txt` and `data/english_names.txt` for name-based safewords.
+- If available in your environment, the bot also attempts to load NPM dictionaries (`stopwords-hi`, `wordlist-english`, etc.). These are filtered to only safelist risky-collision terms.
+
 ## Deployment
 
 - High-load long polling: uses grammY Runner for concurrent update handling. Control concurrency with `RUNNER_CONCURRENCY` (default 100).

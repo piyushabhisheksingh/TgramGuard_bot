@@ -92,6 +92,10 @@ const INDIAN_NAMES_JSON = path.join(DATA_DIR, 'indian_names.json');
 // Optional: dedicated English names dictionary
 const ENGLISH_NAMES_TXT = path.join(DATA_DIR, 'english_names.txt');
 const ENGLISH_NAMES_JSON = path.join(DATA_DIR, 'english_names.json');
+// Optional: dictionary wordlists (local files)
+const HINDI_WORDS_TXT = path.join(DATA_DIR, 'hindi_words.txt');
+const ENGLISH_WORDS_TXT = path.join(DATA_DIR, 'english_words.txt');
+const HINGLISH_WORDS_TXT = path.join(DATA_DIR, 'hinglish_words.txt');
 
 // --- Optional: Load from installed NPM dictionary modules ---
 const requireM = createRequire(import.meta.url);
@@ -167,6 +171,10 @@ export const customSafePatternsNormalized = [
   // If present, also load English names dictionary files
   ...loadSafeTxt(ENGLISH_NAMES_TXT),
   ...loadSafeJson(ENGLISH_NAMES_JSON),
+  // If present, also load local dictionary wordlists and filter to risky-collision terms
+  ...buildSafeFromList(readMaybeFile(HINGLISH_WORDS_TXT)),
+  ...buildSafeFromList(readMaybeFile(HINDI_WORDS_TXT)),
+  ...buildSafeFromList(readMaybeFile(ENGLISH_WORDS_TXT)),
   // If installed, load common npm dictionaries and filter to risky-collision terms
   ...buildSafeFromList(loadModuleWordlist('safe-word-list')),
   ...buildSafeFromList(loadModuleWordlist('stopwords-hi')),

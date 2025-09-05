@@ -1,0 +1,24 @@
+# Add common Hindi words that might be romanized in Hinglish and collide with risky substrings
+# One term per line; comments start with '#'
+
+# 'gand' collisions (benign forms/uses)
+gandhar
+gandharv
+gandharva
+gandhi
+
+# 'ass' benign usages (English loans/common)
+assistant
+assignment
+passable
+passionate
+
+# 'tit' benign
+titular
+tithi
+titli
+
+# 'cum' benign (loan/academic)
+cumulative
+accumulate
+succumb
