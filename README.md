@@ -85,11 +85,13 @@ Limits
   - `data/english_words.txt`
   - `data/hindi_words.txt` (romanized or English words used in Hindi contexts)
   - `data/hinglish_words.txt`
+  - `data/benign_words.txt` (generic benign words for broader safelist training)
+  - `data/benign_phrases.txt` (short benign phrases)
 - Only words that actually contain risky substrings are safelisted (to avoid over-safelisting). The bot normalizes text (lowercase, diacritics stripped, punctuation removed) and strips these safewords before checking explicit patterns.
 - You can still use:
   - `data/safe_terms_custom.txt` and `data/safe_terms_custom.json` for arbitrary safelist terms/phrases.
   - `data/indian_names.txt` and `data/english_names.txt` for name-based safewords.
-- If available in your environment, the bot also attempts to load NPM dictionaries (`stopwords-hi`, `wordlist-english`, etc.). These are filtered to only safelist risky-collision terms.
+- If available in your environment, the bot also attempts to load NPM dictionaries (`stopwords-hi`, `wordlist-english`, `wordfreq`, etc.). These are filtered to only safelist risky-collision terms.
 
 ## Deployment
 

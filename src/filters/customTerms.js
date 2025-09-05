@@ -96,6 +96,9 @@ const ENGLISH_NAMES_JSON = path.join(DATA_DIR, 'english_names.json');
 const HINDI_WORDS_TXT = path.join(DATA_DIR, 'hindi_words.txt');
 const ENGLISH_WORDS_TXT = path.join(DATA_DIR, 'english_words.txt');
 const HINGLISH_WORDS_TXT = path.join(DATA_DIR, 'hinglish_words.txt');
+// Optional: generic benign corpora (words or short phrases)
+const BENIGN_WORDS_TXT = path.join(DATA_DIR, 'benign_words.txt');
+const BENIGN_PHRASES_TXT = path.join(DATA_DIR, 'benign_phrases.txt');
 
 // --- Optional: Load from installed NPM dictionary modules ---
 const requireM = createRequire(import.meta.url);
@@ -165,6 +168,9 @@ function buildSafeFromList(list = []) {
 export const customSafePatternsNormalized = [
   ...loadSafeTxt(SAFE_TXT),
   ...loadSafeJson(SAFE_JSON),
+  // Optional benign corpora to "train" safelist from curated datasets
+  ...loadSafeTxt(BENIGN_WORDS_TXT),
+  ...loadSafeTxt(BENIGN_PHRASES_TXT),
   // If present, also load Indian names dictionary files
   ...loadSafeTxt(INDIAN_NAMES_TXT),
   ...loadSafeJson(INDIAN_NAMES_JSON),
@@ -182,6 +188,10 @@ export const customSafePatternsNormalized = [
   ...buildSafeFromList(loadModuleWordlist('word-list-json')),
   ...buildSafeFromList(loadModuleWordlist('wordlist-english')),
   ...buildSafeFromList(loadModuleWordlist('wordlist-english/english-words')),
+  // Opportunistic extra sources if present in the environment
+  ...buildSafeFromList(loadModuleWordlist('wordfreq')),
+  ...buildSafeFromList(loadModuleWordlist('wordfreq-english')),
+  ...buildSafeFromList(loadModuleWordlist('wordfreq-top5000')),
 ];
 
 // Hydrate additional safelist terms from Supabase, if configured

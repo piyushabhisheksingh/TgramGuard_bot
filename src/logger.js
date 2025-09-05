@@ -97,6 +97,54 @@ export function getRecentLogs(limit = 100, chatId = null) {
   return out;
 }
 
+// --- Safelist suggestions from frequent explicit violations ---
+import { explicitTerms, getSafePatternsNormalized } from './filters/lexicon.js';
+const RISKY_SUBSTRINGS_SUGGEST = ['ass','cum','cock','dick','tit','shit','sex','gand','lund','chut','jhant','jhaat','jhat'];
+
+function tokenizeSuggest(s = '') {
+  try {
+    return (String(s).toLowerCase().match(/[\p{L}\p{N}]+/gu) || []).filter((w) => w.length > 3 && w.length <= 64);
+  } catch {
+    return String(s).toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length > 3 && w.length <= 64);
+  }
+}
+
+function isExplicitToken(tok = '') {
+  try { for (const rx of explicitTerms) if (rx.test(tok)) return true; } catch {}
+  return false;
+}
+
+function isAlreadySafeToken(tok = '') {
+  const n = String(tok || '').toLowerCase();
+  try { for (const rx of getSafePatternsNormalized()) if (rx.test(n)) return true; } catch {}
+  return false;
+}
+
+export async function getSafeSuggestions({ chatId = null, limit = 50, horizon = 500 } = {}) {
+  let logs = await getRecentLogsSupabase(Math.min(horizon, 1000), chatId);
+  if (!logs) logs = getRecentLogs(Math.min(horizon, 1000), chatId);
+  const counts = new Map(); // token -> {count, sample}
+  for (const row of logs) {
+    const vio = (row.violation || '').toLowerCase();
+    if (vio !== 'no_explicit' && vio !== 'name_no_explicit') continue;
+    const content = row.content || '';
+    const tokens = tokenizeSuggest(content);
+    for (const t of tokens) {
+      if (!RISKY_SUBSTRINGS_SUGGEST.some((r) => t.includes(r))) continue;
+      if (isExplicitToken(t)) continue;
+      if (isAlreadySafeToken(t)) continue;
+      const cur = counts.get(t) || { count: 0, sample: content.slice(0, 160) };
+      cur.count += 1;
+      if (!cur.sample) cur.sample = content.slice(0, 160);
+      counts.set(t, cur);
+    }
+  }
+  return Array.from(counts.entries())
+    .sort((a, b) => (b[1].count || 0) - (a[1].count || 0))
+    .slice(0, Math.max(1, Math.min(Number(limit) || 50, 200)))
+    .map(([term, meta]) => ({ term, count: meta.count, sample: meta.sample }));
+}
+
 function recordStats(details, chat) {
   const v = details.violation || '-';
   const a = details.action || 'action';
