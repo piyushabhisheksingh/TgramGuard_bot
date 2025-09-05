@@ -410,14 +410,15 @@ export function securityMiddleware() {
       }
     }
 
-    // Rule 4: No links
-    const hasLink = entitiesContainLink(entities) || textHasLink(text);
+    // Rule 4: No links (also scan poll question/options)
+    const hasLink = entitiesContainLink(entities) || textHasLink(text) || (pollText ? textHasLink(pollText) : false);
     if ((await isRuleEnabled('no_links', ctx.chat.id)) && hasLink) {
       if (await ensureBotCanDelete(ctx)) {
         try {
           await ctx.api.deleteMessage(ctx.chat.id, msg.message_id);
           await notifyAndCleanup(ctx, `${await mentionWithPrefix(ctx, ctx.from, 'no_links')} links are not allowed in this group.${await maybeSuffix(ctx, 'no_links')}`);
-          await logAction(ctx, { action: 'delete_message', action_type: 'moderation', violation: 'no_links', user: ctx.from, chat: ctx.chat, content: text });
+          const contentStr = text || (pollText ? `[POLL] ${pollText}` : '');
+          await logAction(ctx, { action: 'delete_message', action_type: 'moderation', violation: 'no_links', user: ctx.from, chat: ctx.chat, content: contentStr });
         } catch (_) {}
       }
       return;
