@@ -442,10 +442,26 @@ export function settingsMiddleware() {
     const mod = await import('../logger.js');
     const list = await mod.getTopViolators(days, globalFlag ? null : ctx.chat.id, 10);
     if (!list.length) return ctx.reply('No violations found for the selected period.');
-    const rows = list.map((u, i) => {
+    // Resolve names best-effort (per-chat: via getChatMember; global: via getChat if possible)
+    const rows = await Promise.all(list.map(async (u, i) => {
       const topV = Object.entries(u.byViolation||{}).sort((a,b)=> (b[1]||0)-(a[1]||0))[0]?.[0] || '-';
-      return `${i+1}. <a href="tg://user?id=${u.userId}">${esc(u.userId)}</a> — total: <b>${u.total}</b>, risk: <b>${u.risk.toFixed(2)}</b>, top: <code>${esc(topV)}</code>`;
-    });
+      let label = String(u.userId);
+      try {
+        if (!globalFlag && ctx.chat?.id) {
+          const m = await ctx.api.getChatMember(ctx.chat.id, Number(u.userId));
+          const name = [m?.user?.first_name, m?.user?.last_name].filter(Boolean).join(' ');
+          if (name) label = name; else if (m?.user?.username) label = `@${m.user.username}`;
+        } else {
+          try {
+            const ch = await ctx.api.getChat(Number(u.userId));
+            const name = [ch?.first_name, ch?.last_name].filter(Boolean).join(' ');
+            if (name) label = name; else if (ch?.username) label = `@${ch.username}`;
+          } catch {}
+        }
+      } catch {}
+      const anchor = `<a href="tg://user?id=${u.userId}">${esc(label)}</a>`;
+      return `${i+1}. ${anchor} — total: <b>${u.total}</b>, risk: <b>${u.risk.toFixed(2)}</b>, top: <code>${esc(topV)}</code>`;
+    }));
     const scope = globalFlag ? 'across all chats' : 'in this chat';
     const html = [`<b>Top ${list.length} violators (${esc(scope)}, last ${days}d)</b>`, ...rows].join('\n');
     return ctx.reply(html, { parse_mode: 'HTML', disable_web_page_preview: true });
