@@ -265,7 +265,29 @@ export async function addExplicitTerms(terms = []) {
 // Batch add terms and persist to Supabase (best-effort), used by review UI
 export async function addSafeTerms(terms = []) {
   const rowsTerm = [];
+  const rowsWords = [];
   let added = 0;
+  // Local tokenizer for Supabase persistence of individual words (>=4 chars)
+  function splitWords(s = '') {
+    try {
+      const arr = String(s)
+        .toLowerCase()
+        .match(/[\p{L}\p{N}]+/gu) || [];
+      const dedup = new Set();
+      for (const w of arr) {
+        if (w.length > 3 && w.length <= 64) dedup.add(w);
+      }
+      return Array.from(dedup);
+    } catch {
+      // Fallback without Unicode properties
+      const arr = String(s).toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+      const dedup = new Set();
+      for (const w of arr) {
+        if (w.length > 3 && w.length <= 64) dedup.add(w);
+      }
+      return Array.from(dedup);
+    }
+  }
   for (const t of terms) {
     const raw = String(t || '').trim();
     if (!raw) continue;
@@ -277,23 +299,25 @@ export async function addSafeTerms(terms = []) {
       added++;
     } catch {}
     try { fs.appendFileSync(SAFE_TXT, `${raw}\n`); } catch {}
+    // Persist the raw phrase for audit, but also persist split words (>=4 chars) as individual safe terms
     rowsTerm.push({ term: raw, created_at: new Date().toISOString() });
+    const words = splitWords(raw);
+    const now = new Date().toISOString();
+    for (const w of words) rowsWords.push({ term: w, created_at: now });
   }
   let persisted = 0;
   let dbError = null;
   try {
     const sb = getSupabase();
-    if (sb && rowsTerm.length) {
+    if (sb && (rowsTerm.length || rowsWords.length)) {
       const table = process.env.SAFE_TERMS_TABLE || 'safe_terms';
-      // Try preferred schema: column `term` with unique constraint
+      // Preferred schema: column `term` with unique constraint
       let ok = false;
       try {
-        const { data, error } = await sb
-          .from(table)
-          .upsert(rowsTerm, { onConflict: 'term' })
-          .select('term');
+        const batch = rowsWords.length ? rowsWords : rowsTerm;
+        const { data, error } = await sb.from(table).upsert(batch, { onConflict: 'term' }).select('term');
         if (!error) {
-          persisted = Array.isArray(data) ? data.length : rowsTerm.length;
+          persisted = Array.isArray(data) ? data.length : batch.length;
           ok = true;
         } else {
           dbError = error.message || String(error);
@@ -305,7 +329,8 @@ export async function addSafeTerms(terms = []) {
       }
       // Fallback 1: legacy schema uses column `pattern`
       if (!ok) {
-        const rowsPattern = rowsTerm.map((r) => ({ pattern: r.term, created_at: r.created_at }));
+        const src = rowsWords.length ? rowsWords : rowsTerm;
+        const rowsPattern = src.map((r) => ({ pattern: r.term, created_at: r.created_at }));
         try {
           const { data, error } = await sb
             .from(table)
@@ -326,12 +351,10 @@ export async function addSafeTerms(terms = []) {
       // Fallback 2: plain insert without onConflict (may create duplicates but ensures persistence)
       if (!ok) {
         try {
-          const { data, error } = await sb
-            .from(table)
-            .insert(rowsTerm)
-            .select();
+          const batch = rowsWords.length ? rowsWords : rowsTerm;
+          const { data, error } = await sb.from(table).insert(batch).select();
           if (!error) {
-            persisted = Array.isArray(data) ? data.length : rowsTerm.length;
+            persisted = Array.isArray(data) ? data.length : batch.length;
             ok = true;
           } else {
             dbError = error.message || String(error);
