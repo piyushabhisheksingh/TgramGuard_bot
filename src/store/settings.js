@@ -140,6 +140,8 @@ function normalize(s) {
   out.global_limits = { ...DEFAULT_LIMITS, ...(out.global_limits || {}) };
   out.chat_limits ||= {};
   out.chat_whitelist ||= {};
+  // Optional flags
+  out.commands_initialized = Boolean(out.commands_initialized);
   return out;
 }
 
@@ -157,6 +159,22 @@ async function save(current) {
 export async function getSettings() {
   const s = await load();
   return JSON.parse(JSON.stringify(s));
+}
+
+// Bot command menu initialization flags
+export async function areCommandsInitialized() {
+  try {
+    const s = await load();
+    return Boolean(s.commands_initialized);
+  } catch {
+    return false;
+  }
+}
+
+export async function markCommandsInitialized() {
+  const s = await load();
+  s.commands_initialized = true;
+  await save(s);
 }
 
 export async function addBotAdmin(userId) {
