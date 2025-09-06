@@ -200,13 +200,12 @@ async function loadSafeSupabase() {
     const sb = getSupabase();
     if (!sb) return;
     const table = process.env.SAFE_TERMS_TABLE || 'safe_terms';
-    // Try primary expected schema (term). If that fails, fall back to `pattern` for legacy tables.
+    // Schema-tolerant read: prefer `term`, fall back to `pattern`
     let rows = [];
     try {
       const { data, error } = await sb
         .from(table)
-        .select('term,created_at')
-        .order('created_at', { ascending: false })
+        .select('term')
         .limit(5000);
       if (!error) rows = data || [];
     } catch {}
@@ -214,8 +213,7 @@ async function loadSafeSupabase() {
       try {
         const { data, error } = await sb
           .from(table)
-          .select('pattern,created_at')
-          .order('created_at', { ascending: false })
+          .select('pattern')
           .limit(5000);
         if (!error) rows = data || [];
       } catch {}
@@ -321,60 +319,64 @@ export async function addSafeTerms(terms = []) {
     const sb = getSupabase();
     if (sb && (rowsTerm.length || rowsWords.length)) {
       const table = process.env.SAFE_TERMS_TABLE || 'safe_terms';
-      // Preferred schema: column `term` with unique constraint
-      let ok = false;
-      try {
-        const batch = rowsWords.length ? rowsWords : rowsTerm;
-        const { data, error } = await sb.from(table).upsert(batch, { onConflict: 'term' }).select('term');
-        if (!error) {
-          persisted = Array.isArray(data) ? data.length : batch.length;
-          ok = true;
-        } else {
-          dbError = error.message || String(error);
-          console.warn('[safe_terms] upsert(term) failed:', dbError);
-        }
-      } catch (e) {
-        dbError = e?.message || String(e);
-        console.warn('[safe_terms] upsert(term) threw:', dbError);
+
+      function buildBatches(src) {
+        return {
+          termFull: src.map((r) => ({ term: r.term, created_at: r.created_at })),
+          termOnly: src.map((r) => ({ term: r.term })),
+          patternFull: src.map((r) => ({ pattern: r.term, created_at: r.created_at })),
+          patternOnly: src.map((r) => ({ pattern: r.term })),
+        };
       }
-      // Fallback 1: legacy schema uses column `pattern`
-      if (!ok) {
-        const src = rowsWords.length ? rowsWords : rowsTerm;
-        const rowsPattern = src.map((r) => ({ pattern: r.term, created_at: r.created_at }));
+
+      async function tryUpsert(payload, onConflict) {
         try {
-          const { data, error } = await sb
-            .from(table)
-            .upsert(rowsPattern, { onConflict: 'pattern' })
-            .select('pattern');
-          if (!error) {
-            persisted = Array.isArray(data) ? data.length : rowsPattern.length;
-            ok = true;
-          } else {
-            dbError = error.message || String(error);
-            console.warn('[safe_terms] upsert(pattern) failed:', dbError);
-          }
+          const { error } = await sb.from(table).upsert(payload, onConflict ? { onConflict } : undefined);
+          if (!error) return { ok: true, count: payload.length };
+          return { ok: false, err: error.message || String(error) };
         } catch (e) {
-          dbError = e?.message || String(e);
-          console.warn('[safe_terms] upsert(pattern) threw:', dbError);
+          return { ok: false, err: e?.message || String(e) };
         }
       }
-      // Fallback 2: plain insert without onConflict (may create duplicates but ensures persistence)
-      if (!ok) {
+
+      async function tryInsert(payload) {
         try {
-          const batch = rowsWords.length ? rowsWords : rowsTerm;
-          const { data, error } = await sb.from(table).insert(batch).select();
-          if (!error) {
-            persisted = Array.isArray(data) ? data.length : batch.length;
-            ok = true;
-          } else {
-            dbError = error.message || String(error);
-            console.warn('[safe_terms] insert(term) failed:', dbError);
-          }
+          const { error } = await sb.from(table).insert(payload);
+          if (!error) return { ok: true, count: payload.length };
+          return { ok: false, err: error.message || String(error) };
         } catch (e) {
-          dbError = e?.message || String(e);
-          console.warn('[safe_terms] insert(term) threw:', dbError);
+          return { ok: false, err: e?.message || String(e) };
         }
       }
+
+      async function persistBatch(src) {
+        if (!src.length) return { count: 0, err: null };
+        const dedup = new Map();
+        for (const r of src) {
+          const k = String(r.term).toLowerCase();
+          if (!dedup.has(k)) dedup.set(k, r);
+        }
+        const payload = Array.from(dedup.values());
+        const b = buildBatches(payload);
+        const attempts = [
+          () => tryUpsert(b.termFull, 'term'),
+          () => tryUpsert(b.termOnly, 'term'),
+          () => tryUpsert(b.patternFull, 'pattern'),
+          () => tryUpsert(b.patternOnly, 'pattern'),
+          () => tryInsert(b.termOnly),
+          () => tryInsert(b.patternOnly),
+        ];
+        for (const fn of attempts) {
+          const res = await fn();
+          if (res.ok) return { count: res.count, err: null };
+        }
+        return { count: 0, err: 'all attempts failed' };
+      }
+
+      const resWords = await persistBatch(rowsWords);
+      const resTerms = await persistBatch(rowsTerm);
+      persisted = (resWords.count || 0) + (resTerms.count || 0);
+      dbError = resWords.err || resTerms.err || null;
     }
   } catch (e) {
     dbError = e?.message || String(e);
