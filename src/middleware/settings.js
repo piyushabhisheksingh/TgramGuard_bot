@@ -19,7 +19,7 @@ import {
 } from '../store/settings.js';
 import { consumeReview } from '../logger.js';
 import { addSafeTerms, addExplicitTerms } from '../filters/customTerms.js';
-import { addExplicitRuntime } from '../filters.js';
+import { addExplicitRuntime, containsExplicit } from '../filters.js';
 
 // Utilities shared with security middleware (re-implemented minimal)
 async function isChatAdminWithBan(ctx, userId) {
@@ -104,10 +104,10 @@ export function settingsMiddleware() {
     const daily = await mod.getBotStatsPeriod(1);
     const weekly = await mod.getBotStatsPeriod(7);
     if (format === 'compact') {
-      const topV = Object.entries(weekly.byViolation).sort((a,b)=> (b[1]||0)-(a[1]||0)).slice(0,3)
-        .map(([k,v])=> `${esc(k)}=${v}`).join(', ');
-      const topA = Object.entries(weekly.byAction).sort((a,b)=> (b[1]||0)-(a[1]||0)).slice(0,2)
-        .map(([k,v])=> `${esc(k)}=${v}`).join(', ');
+      const topV = Object.entries(weekly.byViolation).sort((a, b) => (b[1] || 0) - (a[1] || 0)).slice(0, 3)
+        .map(([k, v]) => `${esc(k)}=${v}`).join(', ');
+      const topA = Object.entries(weekly.byAction).sort((a, b) => (b[1] || 0) - (a[1] || 0)).slice(0, 2)
+        .map(([k, v]) => `${esc(k)}=${v}`).join(', ');
       return [
         '<b>📊 Bot</b>',
         `today: <b>${daily.total}</b>`,
@@ -145,8 +145,8 @@ export function settingsMiddleware() {
     const weekly = await mod.getGroupStatsPeriod(ctx.chat.id, 7);
     const title = esc(ctx.chat.title || ctx.chat.id);
     if (format === 'compact') {
-      const topV = Object.entries(weekly.byViolation).sort((a,b)=> (b[1]||0)-(a[1]||0)).slice(0,3)
-        .map(([k,v])=> `${esc(k)}=${v}`).join(', ');
+      const topV = Object.entries(weekly.byViolation).sort((a, b) => (b[1] || 0) - (a[1] || 0)).slice(0, 3)
+        .map(([k, v]) => `${esc(k)}=${v}`).join(', ');
       return [
         `👥 <b>${title}</b>`,
         `today: <b>${daily.total}</b>`,
@@ -177,7 +177,7 @@ export function settingsMiddleware() {
     const weekly28 = await mod.getUserStatsPeriod(targetId, chatIdOrNull, 28);
     const weeklyAvg = weekly28.total / 4; // per-week avg over last 28 days
     const risk = mod.computeRiskScore(weekly.byViolation);
-    const weeklyTop = Object.entries(weekly.byViolation).sort((a,b)=> (b[1]||0)-(a[1]||0))[0]?.[0] || '-';
+    const weeklyTop = Object.entries(weekly.byViolation).sort((a, b) => (b[1] || 0) - (a[1] || 0))[0]?.[0] || '-';
     return { daily, weekly, lifetime, dailyAvg, weeklyAvg, risk, weeklyTop };
   }
 
@@ -197,51 +197,55 @@ export function settingsMiddleware() {
   }
 
   // -------- Review callbacks for explicit detections --------
-  const RISKY = ['ass','cum','cock','dick','tit','shit','sex','gand','lund','chut','jhant','jhaat','jhat'];
+  const RISKY = ['ass', 'cum', 'cock', 'dick', 'tit', 'shit', 'sex', 'gand', 'lund', 'chut', 'jhant', 'jhaat', 'jhat'];
   function tokenize(text = '') {
     return String(text)
       .split(/[^\p{L}\p{N}@#._-]+/u)
       .map((t) => t.trim())
       .filter((t) => t.length >= 3 && t.length <= 64);
   }
-  function extractRiskyTokens(text = '', limit = 10) {
+  function extractRiskyTokens(text = '', limit = 300) {
     const tokens = tokenize(text);
-    const out = [];
-    const seen = new Set();
+    let out = [];
     for (const t of tokens) {
       const low = t.toLowerCase();
-      if (containsExplicit(low)) continue;
-      if (seen.has(low)) continue;
-      seen.add(low);
-      out.push(t);
-      if (out.length >= limit) break;
+      if (containsExplicit(low)) {
+        out = [...out, low];
+        if (out.length >= limit) break;
+      };
     }
     return out;
   }
 
-  composer.callbackQuery(/^rv:(ok|addp|addw):([A-Za-z0-9_-]+)$/i, async (ctx) => {
+  // Single "Safelist" action: extract risky tokens from the content and add
+  composer.callbackQuery(/^rv:(ok|add):([A-Za-z0-9_-]+)$/i, async (ctx) => {
     if (!(await isBotAdminOrOwner(ctx))) return ctx.answerCallbackQuery({ text: 'Admins only', show_alert: true });
     const [, kind, id] = ctx.match;
-    const review = consumeReview(id);
+    let review = consumeReview(id);
     if (!review) {
-      try { await ctx.editMessageReplyMarkup({ inline_keyboard: [] }); } catch {}
-      return ctx.answerCallbackQuery({ text: 'Review expired', show_alert: false });
+      // Fallback: parse the phrase from the logged message content
+      try {
+        const m = ctx.callbackQuery?.message;
+        const txt = (m?.text || m?.caption || '').toString();
+        const line = txt.split(/\r?\n/).find((l) => /\bContent:\b/i.test(l));
+        if (line) {
+          const phrase = line.replace(/^.*?Content:\s*/i, '').trim();
+          if (phrase) review = { text: phrase };
+        }
+      } catch { }
+      if (!review) {
+        try { await ctx.editMessageReplyMarkup({ inline_keyboard: [] }); } catch { }
+        return ctx.answerCallbackQuery({ text: 'Review expired', show_alert: false });
+      }
     }
     if (kind === 'ok') {
-      try { await ctx.editMessageReplyMarkup({ inline_keyboard: [] }); } catch {}
+      try { await ctx.editMessageReplyMarkup({ inline_keyboard: [] }); } catch { }
       return ctx.answerCallbackQuery({ text: 'Marked valid', show_alert: false });
     }
-    let cands = [];
-    if (kind === 'addp') {
-      // Safelist entire phrase (trim + cap length)
-      const phrase = String(review.text || '').slice(0, 160).trim();
-      if (phrase) cands = [phrase];
-    } else if (kind === 'addw') {
-      // Safelist only risky tokens from the phrase
-      cands = extractRiskyTokens(review.text, 300);
-    }
+    // Safelist risky tokens from the phrase (no whole-phrase safelisting)
+    const cands = extractRiskyTokens(review.text, 300);
     const { added, persisted, dbError } = await addSafeTerms(cands);
-    try { await ctx.editMessageReplyMarkup({ inline_keyboard: [] }); } catch {}
+    try { await ctx.editMessageReplyMarkup({ inline_keyboard: [] }); } catch { }
     const msg = added
       ? `Safelisted ${added} term(s)${persisted ? ' · DB saved' : dbError ? ' · DB error' : ''}`
       : 'No suitable terms found';
@@ -268,15 +272,15 @@ export function settingsMiddleware() {
       const lines = list.map((x) => `• <code>${esc(x.term)}</code> — <b>${x.count}</b>`).join('\n');
       const kb = {
         inline_keyboard: [
-          [ { text: 'Safelist Top 5', callback_data: `sfs:add:${id}:5:${scope}` }, { text: 'Top 10', callback_data: `sfs:add:${id}:10:${scope}` } ],
-          [ { text: 'Safelist All', callback_data: `sfs:add:${id}:all:${scope}` } ],
+          [{ text: 'Safelist Top 5', callback_data: `sfs:add:${id}:5:${scope}` }, { text: 'Top 10', callback_data: `sfs:add:${id}:10:${scope}` }],
+          [{ text: 'Safelist All', callback_data: `sfs:add:${id}:all:${scope}` }],
         ],
       };
       return ctx.reply([
         `<b>Safelist Suggestions (${scope})</b>`,
         lines,
         '',
-        `<i>Tap a button to add these words${scope==='global' ? ' globally' : ' for this chat (persisted globally)'}.</i>`,
+        `<i>Tap a button to add these words${scope === 'global' ? ' globally' : ' for this chat (persisted globally)'}.</i>`,
       ].join('\n'), { parse_mode: 'HTML', reply_markup: kb, disable_web_page_preview: true });
     } catch (e) {
       return ctx.reply('Failed to build suggestions.');
@@ -288,12 +292,12 @@ export function settingsMiddleware() {
     const [, id, countStr, scope] = ctx.match;
     const row = suggStore.get(id);
     if (!row || row.until < Date.now()) {
-      try { await ctx.editMessageReplyMarkup({ inline_keyboard: [] }); } catch {}
+      try { await ctx.editMessageReplyMarkup({ inline_keyboard: [] }); } catch { }
       return ctx.answerCallbackQuery({ text: 'Suggestions expired', show_alert: false });
     }
     const terms = row.terms.slice(0, countStr === 'all' ? row.terms.length : Number(countStr || 0));
     const { added, persisted, dbError } = await addSafeTerms(terms);
-    try { await ctx.editMessageReplyMarkup({ inline_keyboard: [] }); } catch {}
+    try { await ctx.editMessageReplyMarkup({ inline_keyboard: [] }); } catch { }
     return ctx.answerCallbackQuery({ text: added ? `Safelisted ${added} term(s)${persisted ? ' · DB saved' : dbError ? ' · DB error' : ''}` : 'No terms added', show_alert: false });
   });
 
@@ -327,8 +331,7 @@ export function settingsMiddleware() {
       const text = rep.text || rep.caption || '';
       // Heuristic: extract tokens with risky substrings
       const tokens = tokenize(text);
-      const riskyTokens = extractRiskyTokens(text, 100);
-      candidates.push(...riskyTokens);
+      candidates.push(...tokens);
     }
     if (!candidates.length) {
       return ctx.reply('Usage: /abuse "word or phrase" (or reply to a message with /abuse)');
@@ -354,8 +357,8 @@ export function settingsMiddleware() {
       parts.push(`avg(w): <b>${isFinite(weeklyAvg) ? weeklyAvg.toFixed(2) : '0.00'}</b>`);
       parts.push(`life: <b>${lifetime.total}</b>`);
       parts.push(`risk: <b>${risk.toFixed(2)}</b>`);
-      const top3 = Object.entries(weekly.byViolation).sort((a,b)=> (b[1]||0)-(a[1]||0)).slice(0,3)
-        .map(([k,v])=> `${esc(k)}=${v}`).join(', ');
+      const top3 = Object.entries(weekly.byViolation).sort((a, b) => (b[1] || 0) - (a[1] || 0)).slice(0, 3)
+        .map(([k, v]) => `${esc(k)}=${v}`).join(', ');
       if (top3) parts.push(`top: <code>${top3}</code>`);
       return parts.join(' | ');
     }
@@ -374,7 +377,7 @@ export function settingsMiddleware() {
       `• Daily avg: <b>${isFinite(dailyAvg) ? dailyAvg.toFixed(2) : '0.00'}</b> — Weekly avg: <b>${isFinite(weeklyAvg) ? weeklyAvg.toFixed(2) : '0.00'}</b>`,
       `• Lifetime total: <b>${lifetime.total}</b>`,
       `• Risk score (7d): <b>${risk.toFixed(2)}</b> (<i>${riskLabel(risk)}</i>)`,
-      topViolations.length ? `• <i>Top violations (7d)</i>\n${topViolations.map((s)=>`  • <code>${esc(s)}</code>`).join('\n')}` : '',
+      topViolations.length ? `• <i>Top violations (7d)</i>\n${topViolations.map((s) => `  • <code>${esc(s)}</code>`).join('\n')}` : '',
       '',
       `• <i>7d by violation</i>\n${formatKV(weekly.byViolation)}`,
     ]
@@ -444,7 +447,7 @@ export function settingsMiddleware() {
     if (!list.length) return ctx.reply('No violations found for the selected period.');
     // Resolve names best-effort (per-chat: via getChatMember; global: via getChat if possible)
     const rows = await Promise.all(list.map(async (u, i) => {
-      const topV = Object.entries(u.byViolation||{}).sort((a,b)=> (b[1]||0)-(a[1]||0))[0]?.[0] || '-';
+      const topV = Object.entries(u.byViolation || {}).sort((a, b) => (b[1] || 0) - (a[1] || 0))[0]?.[0] || '-';
       let label = String(u.userId);
       try {
         if (!globalFlag && ctx.chat?.id) {
@@ -456,11 +459,11 @@ export function settingsMiddleware() {
             const ch = await ctx.api.getChat(Number(u.userId));
             const name = [ch?.first_name, ch?.last_name].filter(Boolean).join(' ');
             if (name) label = name; else if (ch?.username) label = `@${ch.username}`;
-          } catch {}
+          } catch { }
         }
-      } catch {}
+      } catch { }
       const anchor = `<a href="tg://user?id=${u.userId}">${esc(label)}</a>`;
-      return `${i+1}. ${anchor} — total: <b>${u.total}</b>, risk: <b>${u.risk.toFixed(2)}</b>, top: <code>${esc(topV)}</code>`;
+      return `${i + 1}. ${anchor} — total: <b>${u.total}</b>, risk: <b>${u.risk.toFixed(2)}</b>, top: <code>${esc(topV)}</code>`;
     }));
     const scope = globalFlag ? 'across all chats' : 'in this chat';
     const html = [`<b>Top ${list.length} violators (${esc(scope)}, last ${days}d)</b>`, ...rows].join('\n');
@@ -546,7 +549,7 @@ export function settingsMiddleware() {
       } catch {
         await ctx.reply([header, ...lines].join('\n'), { reply_markup: kb, disable_web_page_preview: true });
       }
-    } catch (_) {}
+    } catch (_) { }
     return ctx.answerCallbackQuery();
   });
 

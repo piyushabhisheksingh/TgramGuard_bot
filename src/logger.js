@@ -641,7 +641,7 @@ export async function logAction(ctxOrApi, details = {}) {
       replyMarkup = {
         inline_keyboard: [
           [ { text: 'Valid ✅', callback_data: `rv:ok:${rid}` } ],
-          [ { text: 'Safelist Phrase', callback_data: `rv:addp:${rid}` }, { text: 'Safelist Words', callback_data: `rv:addw:${rid}` } ],
+          [ { text: 'Safelist', callback_data: `rv:add:${rid}` } ],
         ],
       };
     }
