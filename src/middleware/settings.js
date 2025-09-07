@@ -238,7 +238,7 @@ export function settingsMiddleware() {
       if (phrase) cands = [phrase];
     } else if (kind === 'addw') {
       // Safelist only risky tokens from the phrase
-      cands = extractRiskyTokens(review.text, 50);
+      cands = extractRiskyTokens(review.text, 300);
     }
     const { added, persisted, dbError } = await addSafeTerms(cands);
     try { await ctx.editMessageReplyMarkup({ inline_keyboard: [] }); } catch {}
@@ -327,7 +327,7 @@ export function settingsMiddleware() {
       const text = rep.text || rep.caption || '';
       // Heuristic: extract tokens with risky substrings
       const tokens = tokenize(text);
-      const riskyTokens = extractRiskyTokens(text, 10);
+      const riskyTokens = extractRiskyTokens(text, 100);
       candidates.push(...riskyTokens);
     }
     if (!candidates.length) {
