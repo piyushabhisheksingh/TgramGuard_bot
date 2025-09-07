@@ -185,7 +185,7 @@ async function ensureBotCommands() {
 }
 
 // Startup: webhook (worker/server) or high-load runner
-const allowedUpdates = ['message', 'edited_message', 'my_chat_member', 'callback_query'];
+const allowedUpdates = ['message', 'edited_message', 'my_chat_member', 'callback_query', 'poll', 'poll_answer'];
 
 const USE_WEBHOOK = Boolean(process.env.WEBHOOK_URL);
 // Kick off first-run command setup (best-effort)

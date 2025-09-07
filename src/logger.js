@@ -279,7 +279,7 @@ export async function getRecentLogsSupabase(limit = 100, chatId = null) {
 }
 
 // --- Inline review support for explicit detections ---
-const REVIEW_TTL_MS = Number(process.env.EXPLICIT_REVIEW_TTL_MS || 6 * 60 * 60 * 1000); // 6h
+const REVIEW_TTL_MS = Number(process.env.EXPLICIT_REVIEW_TTL_MS || 48 * 60 * 60 * 1000); // 6h
 const reviewStore = new Map(); // id -> { until, text }
 
 function createReview(text) {
