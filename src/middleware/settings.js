@@ -210,7 +210,7 @@ export function settingsMiddleware() {
     const seen = new Set();
     for (const t of tokens) {
       const low = t.toLowerCase();
-      if (!RISKY.some((r) => low.includes(r))) continue;
+      if (containsExplicit(low)) continue;
       if (seen.has(low)) continue;
       seen.add(low);
       out.push(t);
