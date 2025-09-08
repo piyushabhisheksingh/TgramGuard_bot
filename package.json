@@ -19,7 +19,8 @@
     "@grammyjs/transformer-throttler": "^1.2.1",
     "dotenv": "^16.4.5",
     "grammy": "^1.38.2",
-    "@supabase/supabase-js": "^2.45.4"
+    "@supabase/supabase-js": "^2.45.4",
+    "openai": "^4.55.0"
   },
   "devDependencies": {
     "nodemon": "^3.1.10"

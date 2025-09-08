@@ -8,6 +8,7 @@ import { securityMiddleware } from './middleware/security.js';
 import { settingsMiddleware } from './middleware/settings.js';
 import { bootstrapAdminsFromEnv, areCommandsInitialized, markCommandsInitialized } from './store/settings.js';
 import { logActionPinned } from './logger.js';
+import { startExplicitLearner } from './learning/explicit_learner.js';
 
 const { apiThrottler } = throttlerModule;
 const token = process.env.BOT_TOKEN;
@@ -190,6 +191,8 @@ const allowedUpdates = ['message', 'edited_message', 'my_chat_member', 'callback
 const USE_WEBHOOK = Boolean(process.env.WEBHOOK_URL);
 // Kick off first-run command setup (best-effort)
 ensureBotCommands();
+// Start group-specific explicit learner if configured
+const explicitLearnerCtl = startExplicitLearner(bot);
 if (USE_WEBHOOK) {
   const PORT = Number(process.env.PORT || 3000);
   const SECRET = process.env.WEBHOOK_SECRET;
@@ -205,7 +208,10 @@ if (USE_WEBHOOK) {
       console.log(`Webhook server listening on :${PORT}`);
     });
     // Graceful shutdown
-    const shutdown = () => server.close(() => process.exit(0));
+    const shutdown = () => {
+      try { explicitLearnerCtl?.stop?.(); } catch {}
+      server.close(() => process.exit(0));
+    };
     process.once('SIGINT', shutdown);
     process.once('SIGTERM', shutdown);
   } catch (e) {
@@ -213,8 +219,8 @@ if (USE_WEBHOOK) {
     const concurrency = Number(process.env.RUNNER_CONCURRENCY || 100);
     const runner = run(bot, { fetch: { allowed_updates: allowedUpdates }, runner: { concurrency } });
     console.log('Runner started (fallback).');
-    process.once('SIGINT', () => runner.stop());
-    process.once('SIGTERM', () => runner.stop());
+    process.once('SIGINT', () => { try { explicitLearnerCtl?.stop?.(); } catch {} runner.stop(); });
+    process.once('SIGTERM', () => { try { explicitLearnerCtl?.stop?.(); } catch {} runner.stop(); });
   }
 } else {
   // High-load long polling with concurrency
@@ -222,6 +228,6 @@ if (USE_WEBHOOK) {
   const runner = run(bot, { fetch: { allowed_updates: allowedUpdates }, runner: { concurrency } });
   console.log('Runner started. Listening for updates...');
   // Graceful shutdown
-  process.once('SIGINT', () => runner.stop());
-  process.once('SIGTERM', () => runner.stop());
+  process.once('SIGINT', () => { try { explicitLearnerCtl?.stop?.(); } catch {} runner.stop(); });
+  process.once('SIGTERM', () => { try { explicitLearnerCtl?.stop?.(); } catch {} runner.stop(); });
 }

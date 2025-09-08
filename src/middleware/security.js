@@ -6,6 +6,8 @@ import {
 } from '../filters.js';
 import { isRuleEnabled, getSettings, getEffectiveMaxLen, isUserWhitelisted } from '../store/settings.js';
 import { logAction, getUserRiskSummary, buildFunnyPrefix } from '../logger.js';
+import { classifyText as aiClassifyText, classifyLinks as aiClassifyLinks } from '../ai/provider_openai.js';
+import { addSafeTerms } from '../filters/customTerms.js';
 
 // Cache for user bio moderation status to reduce API calls
 // Map<userId, { hasLink: boolean, hasExplicit: boolean }>
@@ -309,16 +311,16 @@ export function securityMiddleware() {
       return; // do not continue other middlewares for edited messages
     }
 
-    // Handle new messages (text or captions)
-    const msg = ctx.msg;
-    if (!msg) return next();
+  // Handle new messages (text or captions)
+  const msg = ctx.msg;
+  if (!msg) return next();
 
-    // Extract text/caption and entities
-    const text = msg.text ?? msg.caption ?? '';
-    const entities = msg.entities ?? msg.caption_entities ?? [];
-    // Extract poll contents (question + options) for explicit checks
-    let pollText = '';
-    if (msg.poll) {
+  // Extract text/caption and entities
+  const text = msg.text ?? msg.caption ?? '';
+  const entities = msg.entities ?? msg.caption_entities ?? [];
+  // Extract poll contents (question + options) for explicit checks
+  let pollText = '';
+  if (msg.poll) {
       try {
         const q = String(msg.poll.question || '');
         const opts = Array.isArray(msg.poll.options) ? msg.poll.options.map((o) => o?.text).filter(Boolean) : [];
@@ -326,18 +328,55 @@ export function securityMiddleware() {
       } catch {}
     }
 
-    // Display name checks (apply existing rules to member's name)
-    // Build a display name string from first/last/username
-    const displayName = [
-      ctx.from?.first_name,
-      ctx.from?.last_name,
-      ctx.from?.username ? `@${ctx.from.username}` : null,
-    ]
-      .filter(Boolean)
-      .join(' ');
-    if (displayName) {
-      // Name: no links
-      if ((await isRuleEnabled('no_links', ctx.chat.id)) && textHasLink(displayName)) {
+  // AI cross-check helpers
+  const aiEnabled = (() => {
+    const v = String(process.env.AI_ENABLE || '').toLowerCase();
+    return v === '1' || v === 'true' || v === 'yes' || v === 'on';
+  })();
+  const thresholds = { sexual: Number(process.env.AI_THRESH_SEXUAL || 0.7) };
+  function tokenizePlain(s = '') {
+    try { return (String(s).match(/[\p{L}\p{N}@#._-]+/gu) || []).filter((t) => t.length >= 3 && t.length <= 64); } catch { return (String(s).toLowerCase().split(/[^a-z0-9@#._-]+/) || []).filter((t) => t.length >= 3 && t.length <= 64); }
+  }
+  function extractRiskyTokensFrom(s = '') {
+    const tokens = tokenizePlain(s);
+    const out = [];
+    for (const t of tokens) { if (containsExplicit(t)) out.push(t.toLowerCase()); if (out.length >= 200) break; }
+    return out;
+  }
+
+  // Display name checks (apply existing rules to member's name)
+  // Build a display name string from first/last/username
+  const displayName = [
+    ctx.from?.first_name,
+    ctx.from?.last_name,
+    ctx.from?.username ? `@${ctx.from.username}` : null,
+  ]
+    .filter(Boolean)
+    .join(' ');
+  if (displayName) {
+    // Name: no links
+    if ((await isRuleEnabled('no_links', ctx.chat.id)) && textHasLink(displayName)) {
+      // AI cross-check for links in names
+      if (aiEnabled) {
+        try {
+          const r = await aiClassifyLinks(displayName);
+          if (r && r.has_link === false) {
+            // allow; continue
+          } else {
+            if (await ensureBotCanDelete(ctx)) {
+              try {
+                await ctx.api.deleteMessage(ctx.chat.id, msg.message_id);
+                await notifyAndCleanup(
+                  ctx,
+                  `${await mentionWithPrefix(ctx, ctx.from, 'name_no_links')} your display name contains a link. Please remove links from your name to participate.${await maybeSuffix(ctx, 'name_no_links')}`
+                );
+                await logAction(ctx, { action: 'delete_message', action_type: 'moderation', violation: 'name_no_links', user: ctx.from, chat: ctx.chat, content: displayName });
+              } catch (_) {}
+            }
+            return;
+          }
+        } catch {}
+      } else {
         if (await ensureBotCanDelete(ctx)) {
           try {
             await ctx.api.deleteMessage(ctx.chat.id, msg.message_id);
@@ -350,8 +389,35 @@ export function securityMiddleware() {
         }
         return;
       }
-      // Name: no explicit terms
-      if ((await isRuleEnabled('no_explicit', ctx.chat.id)) && containsExplicit(displayName)) {
+    }
+    // Name: no explicit terms
+    if ((await isRuleEnabled('no_explicit', ctx.chat.id)) && containsExplicit(displayName)) {
+      // AI cross-check sexual; train safelist for false positives
+      if (aiEnabled) {
+        try {
+          const r = await aiClassifyText(displayName);
+          if (r) {
+            const s = r.scores || {};
+            const isSexual = (s['sexual'] || 0) >= thresholds.sexual || Boolean(r.categories?.sexual);
+            if (!isSexual && !r.flagged) {
+              try { const toks = extractRiskyTokensFrom(displayName); if (toks.length) await addSafeTerms(toks); } catch {}
+              // allow; continue other rules
+            } else {
+              if (await ensureBotCanDelete(ctx)) {
+                try {
+                  await ctx.api.deleteMessage(ctx.chat.id, msg.message_id);
+                  await notifyAndCleanup(
+                    ctx,
+                    `${await mentionWithPrefix(ctx, ctx.from, 'name_no_explicit')} your display name contains explicit content. Please change it to participate.${await maybeSuffix(ctx, 'name_no_explicit')}`
+                  );
+                  await logAction(ctx, { action: 'delete_message', action_type: 'moderation', violation: 'name_no_explicit', user: ctx.from, chat: ctx.chat, content: displayName });
+                } catch (_) {}
+              }
+              return;
+            }
+          }
+        } catch {}
+      } else {
         if (await ensureBotCanDelete(ctx)) {
           try {
             await ctx.api.deleteMessage(ctx.chat.id, msg.message_id);
@@ -365,6 +431,7 @@ export function securityMiddleware() {
         return;
       }
     }
+  }
 
     // Rule 5 (extended): bio moderation (links or explicit content)
     const userId = ctx.from?.id;
@@ -375,19 +442,42 @@ export function securityMiddleware() {
           userId,
         );
         if (bioHasLink || bioHasExplicit) {
-        if (await ensureBotCanDelete(ctx)) {
-          try {
-          await ctx.api.deleteMessage(ctx.chat.id, msg.message_id);
-          const reason = bioHasLink && bioHasExplicit
-            ? 'a link and explicit content'
-            : bioHasLink
-            ? 'a link'
-            : 'explicit content';
-          await notifyAndCleanup(ctx, `${await mentionPlainWithPrefix(ctx, ctx.from, 'bio_block')} cannot post because your bio contains ${reason}. Please update your bio to participate.${await maybeSuffix(ctx, 'bio_block')}`);
-          await logAction(ctx, { action: 'delete_message', action_type: 'moderation', violation: 'bio_block', user: ctx.from, chat: ctx.chat, content: bioText ? `[BIO] ${bioText}` : '' });
-        } catch (_) {}
-        }
-        return;
+          let shouldDelete = true;
+          if (aiEnabled) {
+            try {
+              if (bioHasExplicit && bioText) {
+                const r = await aiClassifyText(bioText);
+                if (r) {
+                  const s = r.scores || {};
+                  const ok = (s['sexual'] || 0) < thresholds.sexual && !r.flagged && !r.categories?.sexual;
+                  if (ok) shouldDelete = false;
+                }
+              }
+              if (shouldDelete && bioHasLink && bioText) {
+                const r2 = await aiClassifyLinks(bioText);
+                if (r2 && r2.has_link === false) shouldDelete = false;
+              }
+            } catch {}
+          }
+          if (!shouldDelete) {
+            if (bioHasExplicit && bioText) {
+              try { const toks = extractRiskyTokensFrom(bioText); if (toks.length) await addSafeTerms(toks); } catch {}
+            }
+            return next();
+          }
+          if (await ensureBotCanDelete(ctx)) {
+            try {
+              await ctx.api.deleteMessage(ctx.chat.id, msg.message_id);
+              const reason = bioHasLink && bioHasExplicit
+                ? 'a link and explicit content'
+                : bioHasLink
+                ? 'a link'
+                : 'explicit content';
+              await notifyAndCleanup(ctx, `${await mentionPlainWithPrefix(ctx, ctx.from, 'bio_block')} cannot post because your bio contains ${reason}. Please update your bio to participate.${await maybeSuffix(ctx, 'bio_block')}`);
+              await logAction(ctx, { action: 'delete_message', action_type: 'moderation', violation: 'bio_block', user: ctx.from, chat: ctx.chat, content: bioText ? `[BIO] ${bioText}` : '' });
+            } catch (_) {}
+          }
+          return;
         }
       }
     }
@@ -413,6 +503,14 @@ export function securityMiddleware() {
     // Rule 4: No links (also scan poll question/options)
     const hasLink = entitiesContainLink(entities) || textHasLink(text) || (pollText ? textHasLink(pollText) : false);
     if ((await isRuleEnabled('no_links', ctx.chat.id)) && hasLink) {
+      // AI cross-check to avoid false positives (e.g., obfuscated non-links)
+      if (aiEnabled) {
+        try {
+          const contentStr = text || (pollText ? `[POLL] ${pollText}` : '');
+          const r = await aiClassifyLinks(contentStr);
+          if (r && r.has_link === false) return next();
+        } catch {}
+      }
       if (await ensureBotCanDelete(ctx)) {
         try {
           await ctx.api.deleteMessage(ctx.chat.id, msg.message_id);
@@ -426,6 +524,21 @@ export function securityMiddleware() {
 
     // Rule 3: No explicit content
     if ((await isRuleEnabled('no_explicit', ctx.chat.id)) && containsExplicit(text || pollText)) {
+      // AI cross-check: if AI does not consider sexual, treat as false positive and learn tokens
+      if (aiEnabled) {
+        try {
+          const contentStr = text || (pollText ? `[POLL] ${pollText}` : '');
+          const r = await aiClassifyText(contentStr);
+          if (r) {
+            const s = r.scores || {};
+            const isSexual = (s['sexual'] || 0) >= thresholds.sexual || Boolean(r.categories?.sexual);
+            if (!isSexual && !r.flagged) {
+              try { const toks = extractRiskyTokensFrom(contentStr); if (toks.length) await addSafeTerms(toks); } catch {}
+              return next();
+            }
+          }
+        } catch {}
+      }
       if (await ensureBotCanDelete(ctx)) {
         try {
           await ctx.api.deleteMessage(ctx.chat.id, msg.message_id);
