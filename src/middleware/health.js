@@ -170,11 +170,11 @@ export function healthMiddleware() {
         const scoreTips = buildScoreBasedTips(summary, health, discipline, catH, catD, styleTraits);
         const pTips = buildPersonalitySuggestions(summary.profile || {});
         const msg = [
-          `${mentionHTML(ctx.from)} — <b>Gentle Reminder</b> your recent activity suggests you could benefit from a healthier routine.`,
-          `Health score: <b>${health.score}</b> (${catH.label}); Discipline score: <b>${discipline.score}</b> (${catD.label}).`,
-          aiStyle ? aiStyle : undefined,
-          ai ? ai : `Tips:\n• ${esc(scoreTips.concat(pTips.slice(0, 2)).slice(0, 5).join('\n• '))}`,
-          'Use /health for a personal snapshot or /health_optout to disable.',
+          `🧘 ${mentionHTML(ctx.from)} — <b>Gentle Reminder</b>`,
+          `<b>Scores:</b> Health <b>${health.score}</b> (${catH.label}) · Discipline <b>${discipline.score}</b> (${catD.label})`,
+          aiStyle ? `<b>Style:</b> ${esc(aiStyle)}` : undefined,
+          ai ? `<b>Tips:</b> ${esc(ai)}` : `<b>Tips:</b>\n• ${esc(scoreTips.concat(pTips.slice(0, 2)).slice(0, 5).join('\n• '))}`,
+          '<i>Use /health for a full snapshot or /health_optout to disable.</i>',
         ].filter(Boolean).join('\n');
         try { await ctx.reply(msg, { parse_mode: 'HTML', disable_web_page_preview: true }); } catch {}
       } catch {}
@@ -217,18 +217,18 @@ export function healthMiddleware() {
     const scoreTips = buildScoreBasedTips(summary, health, discipline, catH, catD, styleTraits);
     const hourFmt = (h) => `${String(h).padStart(2, '0')}:00`;
     const lines = [
-      `<b>Your Health Routine Snapshot</b> — ${mentionHTML(ctx.from)}`,
-      `Last seen: <code>${esc(summary.last_seen || '-')}</code>`,
-      `7-day activity: <b>${summary.week_count}</b> · 30-day: <b>${summary.month_count}</b> · Streak: <b>${summary.streak_days}d</b>`,
-      `Top hours: ${summary.top_hours.length ? summary.top_hours.map(hourFmt).join(', ') : '-'}`,
-      `Avg message length: <b>${summary.avg_message_len}</b> chars`,
-      `Profile: name changes <b>${summary?.profile?.changes?.name || 0}</b>, username changes <b>${summary?.profile?.changes?.username || 0}</b>, bio changes <b>${summary?.profile?.changes?.bio || 0}</b>`,
-      `Health score: <b>${health.score}</b> (${catH.label}) · Discipline score: <b>${discipline.score}</b> (${catD.label})`,
-      styleTraits.length ? `Style: ${esc(styleTraits.join(', '))}` : undefined,
+      `🧭 <b>Your Health Snapshot</b> — ${mentionHTML(ctx.from)}`,
+      `<b>Last seen:</b> <code>${esc(summary.last_seen || '-')}</code>`,
+      `<b>Activity:</b> 7d <b>${summary.week_count}</b> · 30d <b>${summary.month_count}</b> · Streak <b>${summary.streak_days}d</b>`,
+      `<b>Top hours:</b> ${summary.top_hours.length ? summary.top_hours.map(hourFmt).join(', ') : '-'}`,
+      `<b>Avg length:</b> <b>${summary.avg_message_len}</b> chars` ,
+      `<b>Profile changes:</b> name <b>${summary?.profile?.changes?.name || 0}</b> · username <b>${summary?.profile?.changes?.username || 0}</b> · bio <b>${summary?.profile?.changes?.bio || 0}</b>`,
+      `<b>Scores:</b> Health <b>${health.score}</b> (${catH.label}) · Discipline <b>${discipline.score}</b> (${catD.label})`,
+      styleTraits.length ? `<b>Style:</b> ${esc(styleTraits.join(', '))}` : undefined,
       '',
-      '<b>Suggestions</b>',
-      ...(aiStyle ? [esc(aiStyle)] : []),
-      ...(ai ? [esc(ai)] : scoreTips.concat(pTips.slice(0, 3)).map(t => `• ${esc(t)}`)),
+      '✅ <b>Suggestions</b>',
+      ...(aiStyle ? [`<i>${esc(aiStyle)}</i>`] : []),
+      ...(ai ? [`<i>${esc(ai)}</i>`] : scoreTips.concat(pTips.slice(0, 3)).map(t => `• ${esc(t)}`)),
     ];
     return ctx.reply(lines.join('\n'), { parse_mode: 'HTML', disable_web_page_preview: true });
   });
@@ -254,18 +254,18 @@ export function healthMiddleware() {
     const scoreTips = buildScoreBasedTips(summary, health, discipline, catH, catD, styleTraits);
     const hourFmt = (h) => `${String(h).padStart(2, '0')}:00`;
     const lines = [
-      `<b>Health Snapshot</b> — ${mentionHTML(replyFrom || { id: targetId, first_name: 'User' })}`,
-      `Last seen: <code>${esc(summary.last_seen || '-')}</code>`,
-      `7-day: <b>${summary.week_count}</b> · 30-day: <b>${summary.month_count}</b> · Streak: <b>${summary.streak_days}d</b>`,
-      `Top hours: ${summary.top_hours.length ? summary.top_hours.map(hourFmt).join(', ') : '-'}`,
-      `Avg msg length: <b>${summary.avg_message_len}</b> chars`,
-      `Profile: name changes <b>${summary?.profile?.changes?.name || 0}</b>, username changes <b>${summary?.profile?.changes?.username || 0}</b>, bio changes <b>${summary?.profile?.changes?.bio || 0}</b>`,
-      `Health score: <b>${health.score}</b> (${catH.label}) · Discipline score: <b>${discipline.score}</b> (${catD.label})`,
-      styleTraits.length ? `Style: ${esc(styleTraits.join(', '))}` : undefined,
+      `🧭 <b>Health Snapshot</b> — ${mentionHTML(replyFrom || { id: targetId, first_name: 'User' })}`,
+      `<b>Last seen:</b> <code>${esc(summary.last_seen || '-')}</code>`,
+      `<b>Activity:</b> 7d <b>${summary.week_count}</b> · 30d <b>${summary.month_count}</b> · Streak <b>${summary.streak_days}d</b>`,
+      `<b>Top hours:</b> ${summary.top_hours.length ? summary.top_hours.map(hourFmt).join(', ') : '-'}`,
+      `<b>Avg length:</b> <b>${summary.avg_message_len}</b> chars`,
+      `<b>Profile changes:</b> name <b>${summary?.profile?.changes?.name || 0}</b> · username <b>${summary?.profile?.changes?.username || 0}</b> · bio <b>${summary?.profile?.changes?.bio || 0}</b>`,
+      `<b>Scores:</b> Health <b>${health.score}</b> (${catH.label}) · Discipline <b>${discipline.score}</b> (${catD.label})`,
+      styleTraits.length ? `<b>Style:</b> ${esc(styleTraits.join(', '))}` : undefined,
       '',
-      '<b>Suggestions</b>',
-      ...(aiStyle ? [esc(aiStyle)] : []),
-      ...(ai ? [esc(ai)] : scoreTips.concat(pTips.slice(0, 3)).map(t => `• ${esc(t)}`)),
+      '✅ <b>Suggestions</b>',
+      ...(aiStyle ? [`<i>${esc(aiStyle)}</i>`] : []),
+      ...(ai ? [`<i>${esc(ai)}</i>`] : scoreTips.concat(pTips.slice(0, 3)).map(t => `• ${esc(t)}`)),
     ];
     return ctx.reply(lines.join('\n'), { parse_mode: 'HTML', disable_web_page_preview: true });
   });
