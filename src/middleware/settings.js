@@ -258,7 +258,7 @@ export function settingsMiddleware() {
   const SUGG_TTL_MS = 15 * 60 * 1000;
 
   composer.command('safelist_suggest', async (ctx) => {
-    if (!(await isBotAdminOrOwner(ctx))) return ctx.reply('Admins only');
+    if (!(await isBotAdminOrOwner(ctx))) return ctx.reply('⛔ <b>Admins only</b>', { parse_mode: 'HTML' });
     const parts = String(ctx.match || '').trim().split(/\s+/).filter(Boolean);
     const scope = (parts[0] || 'chat').toLowerCase();
     const limit = Number(parts[1] || 20) || 20;
@@ -266,7 +266,7 @@ export function settingsMiddleware() {
     try {
       const mod = await import('../logger.js');
       const list = await mod.getSafeSuggestions({ chatId: chatScope, limit, horizon: 800 });
-      if (!list.length) return ctx.reply('No suggestions found.');
+      if (!list.length) return ctx.reply('ℹ️ <b>No suggestions found</b>', { parse_mode: 'HTML' });
       const id = Math.random().toString(36).slice(2);
       const until = Date.now() + SUGG_TTL_MS;
       suggStore.set(id, { until, terms: list.map((x) => x.term) });
@@ -324,7 +324,7 @@ export function settingsMiddleware() {
   }
 
   composer.command('abuse', async (ctx) => {
-    if (!(await isBotAdminOrOwner(ctx))) return ctx.reply('Admins only.');
+    if (!(await isBotAdminOrOwner(ctx))) return ctx.reply('⛔ <b>Admins only</b>', { parse_mode: 'HTML' });
     const args = parseCommandArgs(ctx);
     let candidates = parseQuoted(args);
     if ((!candidates || !candidates.length) && ctx.msg?.reply_to_message) {
@@ -335,12 +335,12 @@ export function settingsMiddleware() {
       candidates.push(...tokens);
     }
     if (!candidates.length) {
-      return ctx.reply('Usage: /abuse "word or phrase" (or reply to a message with /abuse)');
+      return ctx.reply('💡 <b>Usage:</b> <code>/abuse "word or phrase"</code> (or reply to a message with <code>/abuse</code>)', { parse_mode: 'HTML' });
     }
     // Apply at runtime and persist
     addExplicitRuntime(candidates);
     const added = await addExplicitTerms(candidates);
-    return ctx.reply(`Added ${added} phrase(s) to explicit list.`);
+    return ctx.reply(`✅ <b>Added</b> <b>${added}</b> phrase(s) to explicit list.`, { parse_mode: 'HTML' });
   });
 
   async function buildUserStatsMessage(ctx, targetId, scope = 'chat', format = 'pretty') {
@@ -445,7 +445,7 @@ export function settingsMiddleware() {
     const globalFlag = tokens.includes('global');
     const mod = await import('../logger.js');
     const list = await mod.getTopViolators(days, globalFlag ? null : ctx.chat.id, 10);
-    if (!list.length) return ctx.reply('No violations found for the selected period.');
+    if (!list.length) return ctx.reply('ℹ️ <b>No violations found</b> for the selected period.', { parse_mode: 'HTML' });
     // Resolve names best-effort (per-chat: via getChatMember; global: via getChat if possible)
     const rows = await Promise.all(list.map(async (u, i) => {
       const topV = Object.entries(u.byViolation || {}).sort((a, b) => (b[1] || 0) - (a[1] || 0))[0]?.[0] || '-';
@@ -516,9 +516,9 @@ export function settingsMiddleware() {
           { text: 'Next ⏭️', callback_data: `ugroups:${targetId}:${nextOff}:${limit}` },
         ]],
       };
-      return ctx.reply([header, ...lines].join('\n'), { reply_markup: kb, disable_web_page_preview: true });
+      return ctx.reply(`<b>${esc(header)}</b>\n${esc(lines.join('\n'))}`, { parse_mode: 'HTML', reply_markup: kb, disable_web_page_preview: true });
     } catch (e) {
-      return ctx.reply(`Failed to fetch presence: ${e?.message || e}`);
+      return ctx.reply(`❌ <b>Failed to fetch presence:</b> <code>${esc(e?.message || String(e))}</code>`, { parse_mode: 'HTML' });
     }
   });
 
@@ -546,9 +546,9 @@ export function settingsMiddleware() {
         ]],
       };
       try {
-        await ctx.editMessageText([header, ...lines].join('\n'), { reply_markup: kb, disable_web_page_preview: true });
+        await ctx.editMessageText(`<b>${esc(header)}</b>\n${esc(lines.join('\n'))}`, { parse_mode: 'HTML', reply_markup: kb, disable_web_page_preview: true });
       } catch {
-        await ctx.reply([header, ...lines].join('\n'), { reply_markup: kb, disable_web_page_preview: true });
+        await ctx.reply(`<b>${esc(header)}</b>\n${esc(lines.join('\n'))}`, { parse_mode: 'HTML', reply_markup: kb, disable_web_page_preview: true });
       }
     } catch (_) { }
     return ctx.answerCallbackQuery();
@@ -637,14 +637,14 @@ export function settingsMiddleware() {
       id = Number(idStr);
     }
     if (!Number.isFinite(id)) {
-      return ctx.reply('Usage: Reply to a user with /botadmin_add, or provide /botadmin_add <user_id>');
+      return ctx.reply('💡 <b>Usage:</b> Reply to a user with <code>/botadmin_add</code>, or provide <code>/botadmin_add &lt;user_id&gt;</code>', { parse_mode: 'HTML' });
     }
     if (replyFrom?.is_bot) {
-      return ctx.reply('Bots cannot be promoted to bot admin.');
+      return ctx.reply('🤖 Bots cannot be promoted to bot admin.', { parse_mode: 'HTML' });
     }
     await addBotAdmin(id);
     await logAction(ctx, { action: 'botadmin_add', action_type: 'admin', user: replyFrom || { id }, chat: ctx.chat, violation: '-', content: `Added bot admin: ${id}` });
-    return ctx.reply(`Added bot admin: ${id}`);
+    return ctx.reply(`✅ <b>Added bot admin:</b> <code>${id}</code>`, { parse_mode: 'HTML' });
   });
 
   composer.command('botadmin_remove', async (ctx) => {
@@ -656,56 +656,56 @@ export function settingsMiddleware() {
       id = Number(idStr);
     }
     if (!Number.isFinite(id)) {
-      return ctx.reply('Usage: Reply to a user with /botadmin_remove, or provide /botadmin_remove <user_id>');
+      return ctx.reply('💡 <b>Usage:</b> Reply to a user with <code>/botadmin_remove</code>, or provide <code>/botadmin_remove &lt;user_id&gt;</code>', { parse_mode: 'HTML' });
     }
     if (replyFrom?.is_bot) {
-      return ctx.reply('Bots are not in the bot admin list.');
+      return ctx.reply('🤖 Bots are not in the bot admin list.', { parse_mode: 'HTML' });
     }
     await removeBotAdmin(id);
     await logAction(ctx, { action: 'botadmin_remove', action_type: 'admin', user: replyFrom || { id }, chat: ctx.chat, violation: '-', content: `Removed bot admin: ${id}` });
-    return ctx.reply(`Removed bot admin: ${id}`);
+    return ctx.reply(`🗑️ <b>Removed bot admin:</b> <code>${id}</code>`, { parse_mode: 'HTML' });
   });
 
   // Global rule toggles (owner or bot admin)
   composer.command('rule_global_enable', async (ctx) => {
     if (!(await isBotAdminOrOwner(ctx))) return;
     const [, rule] = ctx.message.text.trim().split(/\s+/, 2);
-    if (!RULE_KEYS.includes(rule)) return ctx.reply(`Unknown rule. Use one of: ${RULE_KEYS.join(', ')}`);
+    if (!RULE_KEYS.includes(rule)) return ctx.reply(`❓ <b>Unknown rule.</b> Use one of: <code>${RULE_KEYS.join(', ')}</code>`, { parse_mode: 'HTML' });
     await setGlobalRule(rule, true);
     await logAction(ctx, { action: 'rule_global_enable', action_type: 'settings', chat: ctx.chat, violation: '-', content: `Enabled ${rule} globally` });
-    return ctx.reply(`Enabled ${rule} globally.`);
+    return ctx.reply(`✅ <b>Enabled</b> <code>${rule}</code> globally.`, { parse_mode: 'HTML' });
   });
 
   composer.command('rule_global_disable', async (ctx) => {
     if (!(await isBotAdminOrOwner(ctx))) return;
     const [, rule] = ctx.message.text.trim().split(/\s+/, 2);
-    if (!RULE_KEYS.includes(rule)) return ctx.reply(`Unknown rule. Use one of: ${RULE_KEYS.join(', ')}`);
+    if (!RULE_KEYS.includes(rule)) return ctx.reply(`❓ <b>Unknown rule.</b> Use one of: <code>${RULE_KEYS.join(', ')}</code>`, { parse_mode: 'HTML' });
     await setGlobalRule(rule, false);
     await logAction(ctx, { action: 'rule_global_disable', action_type: 'settings', chat: ctx.chat, violation: '-', content: `Disabled ${rule} globally` });
-    return ctx.reply(`Disabled ${rule} globally.`);
+    return ctx.reply(`🚫 <b>Disabled</b> <code>${rule}</code> globally.`, { parse_mode: 'HTML' });
   });
 
   // Chat rule toggles (chat admin with ban rights, or bot admin/owner)
   composer.command('rule_chat_enable', async (ctx) => {
     const rule = ctx.message.text.trim().split(/\s+/, 2)[1];
-    if (!RULE_KEYS.includes(rule)) return ctx.reply(`Unknown rule. Use one of: ${RULE_KEYS.join(', ')}`);
+    if (!RULE_KEYS.includes(rule)) return ctx.reply(`❓ <b>Unknown rule.</b> Use one of: <code>${RULE_KEYS.join(', ')}</code>`, { parse_mode: 'HTML' });
     const userId = ctx.from?.id;
     const ok = (await isBotAdminOrOwner(ctx)) || (await isChatAdminWithBan(ctx, userId));
     if (!ok) return;
     await setChatRule(String(ctx.chat.id), rule, true);
     await logAction(ctx, { action: 'rule_chat_enable', action_type: 'settings', chat: ctx.chat, violation: '-', content: `Enabled ${rule} for chat` });
-    return ctx.reply(`Enabled ${rule} for this chat.`);
+    return ctx.reply(`✅ <b>Enabled</b> <code>${rule}</code> for this chat.`, { parse_mode: 'HTML' });
   });
 
   composer.command('rule_chat_disable', async (ctx) => {
     const rule = ctx.message.text.trim().split(/\s+/, 2)[1];
-    if (!RULE_KEYS.includes(rule)) return ctx.reply(`Unknown rule. Use one of: ${RULE_KEYS.join(', ')}`);
+    if (!RULE_KEYS.includes(rule)) return ctx.reply(`❓ <b>Unknown rule.</b> Use one of: <code>${RULE_KEYS.join(', ')}</code>`, { parse_mode: 'HTML' });
     const userId = ctx.from?.id;
     const ok = (await isBotAdminOrOwner(ctx)) || (await isChatAdminWithBan(ctx, userId));
     if (!ok) return;
     await setChatRule(String(ctx.chat.id), rule, false);
     await logAction(ctx, { action: 'rule_chat_disable', action_type: 'settings', chat: ctx.chat, violation: '-', content: `Disabled ${rule} for chat` });
-    return ctx.reply(`Disabled ${rule} for this chat.`);
+    return ctx.reply(`🚫 <b>Disabled</b> <code>${rule}</code> for this chat.`, { parse_mode: 'HTML' });
   });
 
   // Status
@@ -722,17 +722,17 @@ export function settingsMiddleware() {
       globalMax,
       chatMax,
     });
-    return ctx.reply(msg);
+    return ctx.reply(`📋 <b>Rules status</b>\n${esc(msg)}`, { parse_mode: 'HTML' });
   });
 
   // Global and chat max_len setters
   composer.command('maxlen_global_set', async (ctx) => {
     if (!(await isBotAdminOrOwner(ctx))) return;
     const n = Number(ctx.message.text.trim().split(/\s+/, 2)[1]);
-    if (!Number.isFinite(n)) return ctx.reply('Usage: /maxlen_global_set <number>');
+    if (!Number.isFinite(n)) return ctx.reply('💡 <b>Usage:</b> <code>/maxlen_global_set &lt;number&gt;</code>', { parse_mode: 'HTML' });
     await setGlobalMaxLenLimit(n);
     await logAction(ctx, { action: 'maxlen_global_set', action_type: 'settings', chat: ctx.chat, violation: '-', content: `Global max_len=${Math.trunc(n)}` });
-    return ctx.reply(`Global max length limit set to ${Math.trunc(n)}.`);
+    return ctx.reply(`✅ <b>Global max length limit:</b> <code>${Math.trunc(n)}</code>`, { parse_mode: 'HTML' });
   });
 
   composer.command('maxlen_chat_set', async (ctx) => {
@@ -740,10 +740,10 @@ export function settingsMiddleware() {
     const ok = (await isBotAdminOrOwner(ctx)) || (await isChatAdminWithBan(ctx, userId));
     if (!ok) return;
     const n = Number(ctx.message.text.trim().split(/\s+/, 2)[1]);
-    if (!Number.isFinite(n)) return ctx.reply('Usage: /maxlen_chat_set <number>');
+    if (!Number.isFinite(n)) return ctx.reply('💡 <b>Usage:</b> <code>/maxlen_chat_set &lt;number&gt;</code>', { parse_mode: 'HTML' });
     await setChatMaxLenLimit(String(ctx.chat.id), n);
     await logAction(ctx, { action: 'maxlen_chat_set', action_type: 'settings', chat: ctx.chat, violation: '-', content: `Chat max_len=${Math.trunc(n)}` });
-    return ctx.reply(`Chat max length limit set to ${Math.trunc(n)}.`);
+    return ctx.reply(`✅ <b>Chat max length limit:</b> <code>${Math.trunc(n)}</code>`, { parse_mode: 'HTML' });
   });
 
   // Chat whitelist commands (chat admin with ban rights, or bot admin/owner)
@@ -759,14 +759,14 @@ export function settingsMiddleware() {
       targetId = Number(arg);
     }
     if (!Number.isFinite(targetId)) {
-      return ctx.reply('Usage: Reply to a user with /whitelist_add, or provide /whitelist_add <user_id>');
+      return ctx.reply('💡 <b>Usage:</b> Reply to a user with <code>/whitelist_add</code>, or provide <code>/whitelist_add &lt;user_id&gt;</code>', { parse_mode: 'HTML' });
     }
     if (replyFrom?.is_bot) {
-      return ctx.reply('Bots cannot be whitelisted.');
+      return ctx.reply('🤖 Bots cannot be whitelisted.', { parse_mode: 'HTML' });
     }
     await addChatWhitelistUser(String(ctx.chat.id), targetId);
     await logAction(ctx, { action: 'whitelist_add', action_type: 'settings', user: replyFrom || { id: targetId }, chat: ctx.chat, violation: '-', content: `Whitelisted user ${targetId}` });
-    return ctx.reply(`User ${targetId} added to whitelist for this chat.`);
+    return ctx.reply(`✅ <b>Whitelisted</b> user <code>${targetId}</code> for this chat.`, { parse_mode: 'HTML' });
   });
 
   composer.command('whitelist_remove', async (ctx) => {
@@ -781,14 +781,14 @@ export function settingsMiddleware() {
       targetId = Number(arg);
     }
     if (!Number.isFinite(targetId)) {
-      return ctx.reply('Usage: Reply to a user with /whitelist_remove, or provide /whitelist_remove <user_id>');
+      return ctx.reply('💡 <b>Usage:</b> Reply to a user with <code>/whitelist_remove</code>, or provide <code>/whitelist_remove &lt;user_id&gt;</code>', { parse_mode: 'HTML' });
     }
     if (replyFrom?.is_bot) {
-      return ctx.reply('Bots cannot be whitelisted.');
+      return ctx.reply('🤖 Bots cannot be whitelisted.', { parse_mode: 'HTML' });
     }
     await removeChatWhitelistUser(String(ctx.chat.id), targetId);
     await logAction(ctx, { action: 'whitelist_remove', action_type: 'settings', user: replyFrom || { id: targetId }, chat: ctx.chat, violation: '-', content: `Removed user ${targetId} from whitelist` });
-    return ctx.reply(`User ${targetId} removed from whitelist for this chat.`);
+    return ctx.reply(`🗑️ <b>Removed</b> user <code>${targetId}</code> from whitelist.`, { parse_mode: 'HTML' });
   });
 
   composer.command('whitelist_list', async (ctx) => {
@@ -796,8 +796,8 @@ export function settingsMiddleware() {
     const ok = (await isBotAdminOrOwner(ctx)) || (await isChatAdminWithBan(ctx, userId));
     if (!ok) return;
     const list = await getChatWhitelist(String(ctx.chat.id));
-    if (!list.length) return ctx.reply('Whitelist is empty for this chat.');
-    return ctx.reply(`Whitelisted user IDs:\n${list.join('\n')}`);
+    if (!list.length) return ctx.reply('ℹ️ <b>Whitelist is empty for this chat.</b>', { parse_mode: 'HTML' });
+    return ctx.reply(`✅ <b>Whitelisted user IDs:</b>\n${list.map((id)=>`• <code>${id}</code>`).join('\n')}`, { parse_mode: 'HTML' });
   });
 
   // Bot command menu management
@@ -814,9 +814,9 @@ export function settingsMiddleware() {
       // Owner-level commands (optional): set for all private chats to reduce clutter in groups
       await ctx.api.setMyCommands(ownerPrivateCommands, { scope: { type: 'all_private_chats' } });
 
-      return ctx.reply('Bot commands have been set.');
+      return ctx.reply('✅ <b>Bot commands have been set.</b>', { parse_mode: 'HTML' });
     } catch (e) {
-      return ctx.reply(`Failed to set commands: ${e?.description || e?.message || e}`);
+      return ctx.reply(`❌ <b>Failed to set commands:</b> <code>${esc(e?.description || e?.message || String(e))}</code>`, { parse_mode: 'HTML' });
     }
   });
 
@@ -826,7 +826,7 @@ export function settingsMiddleware() {
     try {
       await ctx.api.deleteMyCommands({ scope: { type: 'default' } });
       await ctx.api.deleteMyCommands({ scope: { type: 'all_chat_administrators' } });
-      return ctx.reply('Bot commands have been removed.');
+      return ctx.reply('🗑️ <b>Bot commands have been removed.</b>', { parse_mode: 'HTML' });
     } catch (e) {
       return ctx.reply(`Failed to remove commands: ${e?.description || e?.message || e}`);
     }
