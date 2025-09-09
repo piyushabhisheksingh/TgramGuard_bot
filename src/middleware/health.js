@@ -69,6 +69,47 @@ function buildPersonalitySuggestions(profile) {
   return tips.filter((t) => (seen.has(t) ? false : (seen.add(t), true)));
 }
 
+// Build targeted suggestions based on health/discipline scores and style traits
+function buildScoreBasedTips(summary, health, discipline, catH, catD, styleTraits = []) {
+  const tips = [];
+  // Health-oriented suggestions by category
+  if (health.score < 40) {
+    tips.push('Fix sleep rhythm: keep a consistent sleep/wake time and avoid screens 60–90 minutes before bed.');
+    tips.push('Try 5–10 minutes of pranayama and a short meditation in the evening to unwind.');
+    tips.push('Set quiet hours for chats and keep late-night sessions minimal.');
+  } else if (health.score < 55) {
+    tips.push('Stabilize your day: regular sleep window, micro‑breaks hourly, and steady hydration.');
+    tips.push('Evening wind‑down: light stretching or a few Surya Namaskars, then deep breathing.');
+  } else if (health.score < 70) {
+    tips.push('You are close to balanced—add short movement breaks and a simple morning routine.');
+    tips.push('Use batch notifications to reduce frequent checking.');
+  } else if (health.score < 85) {
+    tips.push('Nice balance—maintain your routine and schedule one weekly device‑free block.');
+  } else {
+    tips.push('Excellent balance—keep your sattvic routine and mindful breaks.');
+  }
+  // Discipline-oriented suggestions by category
+  if (discipline.score < 55) {
+    tips.push('Keep tone calm and clear; reduce all‑caps and extra exclamation marks.');
+    tips.push('Avoid frequent link dropping; focus on concise, helpful messages.');
+    tips.push('Practice ahimsa (non‑harm) and satya (truthful clarity) in speech.');
+  } else if (discipline.score < 70) {
+    tips.push('Polish your tone: fewer exclamations, more concise points.');
+  } else if (discipline.score >= 85) {
+    tips.push('Great communication discipline—keep it up.');
+  }
+  // Style‑specific nudges
+  const st = new Set(styleTraits || []);
+  if (st.has('shouty')) tips.push('Use normal case—ALL CAPS can feel intense to others.');
+  if (st.has('promotional')) tips.push('Limit links/self‑promotion; add value first.');
+  if (st.has('verbose')) tips.push('Aim for shorter messages or bullet points.');
+  if (st.has('excitable')) tips.push('Trim exclamation marks; a calmer tone improves clarity.');
+  if (st.has('concise')) tips.push('Your concise style is effective—keep it up.');
+  // De‑duplicate
+  const seen = new Set();
+  return tips.filter((t) => (seen.has(t) ? false : (seen.add(t), true)));
+}
+
 export function healthMiddleware() {
   const composer = new Composer();
   const adviseCooldownMs = Number(process.env.HEALTH_ADVISE_COOLDOWN_MS || 24 * 60 * 60 * 1000); // default 24h
@@ -125,17 +166,14 @@ export function healthMiddleware() {
         lastAdvice.set(userId, now);
         const ai = await aiAssessment(summary, discipline);
         const aiStyle = await aiPersonalityAssessment(summary);
-        const tips = [
-          'Consider a consistent sleep window and reduce late-night screen time.',
-          'Take short breaks every hour and hydrate regularly.',
-          'Keep messages concise and plan focus blocks away from chats.'
-        ];
+        const styleTraits = buildStyleTraits(summary);
+        const scoreTips = buildScoreBasedTips(summary, health, discipline, catH, catD, styleTraits);
         const pTips = buildPersonalitySuggestions(summary.profile || {});
         const msg = [
           `${mentionHTML(ctx.from)} — <b>Gentle Reminder</b> your recent activity suggests you could benefit from a healthier routine.`,
           `Health score: <b>${health.score}</b> (${catH.label}); Discipline score: <b>${discipline.score}</b> (${catD.label}).`,
           aiStyle ? aiStyle : undefined,
-          ai ? ai : `Tips:\n• ${esc(tips.concat(pTips.slice(0, 3)).join('\n• '))}`,
+          ai ? ai : `Tips:\n• ${esc(scoreTips.concat(pTips.slice(0, 2)).slice(0, 5).join('\n• '))}`,
           'Use /health for a personal snapshot or /health_optout to disable.',
         ].filter(Boolean).join('\n');
         try { await ctx.reply(msg, { parse_mode: 'HTML', disable_web_page_preview: true }); } catch {}
@@ -168,15 +206,15 @@ export function healthMiddleware() {
     if (await isOptedOut(uid)) return ctx.reply('Health tracking is disabled for you. Use /health_optin to enable.');
     const summary = await getUserSummary(uid);
     if (!summary) return ctx.reply('No activity yet. Come back after some usage.');
-    const tips = buildSuggestions(summary);
-    const pTips = buildPersonalitySuggestions(summary.profile || {});
     const styleTraits = buildStyleTraits(summary);
+    const pTips = buildPersonalitySuggestions(summary.profile || {});
     const health = computeHealthScore(summary);
     const discipline = await computeDisciplineScore(uid, ctx.chat?.id);
     const catH = categorize(health.score);
     const catD = categorize(discipline.score);
     const ai = await aiAssessment(summary, discipline);
     const aiStyle = await aiPersonalityAssessment(summary);
+    const scoreTips = buildScoreBasedTips(summary, health, discipline, catH, catD, styleTraits);
     const hourFmt = (h) => `${String(h).padStart(2, '0')}:00`;
     const lines = [
       `<b>Your Health Routine Snapshot</b> — ${mentionHTML(ctx.from)}`,
@@ -190,7 +228,7 @@ export function healthMiddleware() {
       '',
       '<b>Suggestions</b>',
       ...(aiStyle ? [esc(aiStyle)] : []),
-      ...(ai ? [esc(ai)] : tips.concat(pTips.slice(0, 3)).map(t => `• ${esc(t)}`)),
+      ...(ai ? [esc(ai)] : scoreTips.concat(pTips.slice(0, 3)).map(t => `• ${esc(t)}`)),
     ];
     return ctx.reply(lines.join('\n'), { parse_mode: 'HTML', disable_web_page_preview: true });
   });
@@ -205,15 +243,15 @@ export function healthMiddleware() {
     if (await isOptedOut(targetId)) return ctx.reply('User has opted out of health tracking.');
     const summary = await getUserSummary(targetId);
     if (!summary) return ctx.reply('No activity recorded for that user.');
-    const tips = buildSuggestions(summary);
-    const pTips = buildPersonalitySuggestions(summary.profile || {});
     const styleTraits = buildStyleTraits(summary);
+    const pTips = buildPersonalitySuggestions(summary.profile || {});
     const health = computeHealthScore(summary);
     const discipline = await computeDisciplineScore(targetId, ctx.chat?.id);
     const catH = categorize(health.score);
     const catD = categorize(discipline.score);
     const ai = await aiAssessment(summary, discipline);
     const aiStyle = await aiPersonalityAssessment(summary);
+    const scoreTips = buildScoreBasedTips(summary, health, discipline, catH, catD, styleTraits);
     const hourFmt = (h) => `${String(h).padStart(2, '0')}:00`;
     const lines = [
       `<b>Health Snapshot</b> — ${mentionHTML(replyFrom || { id: targetId, first_name: 'User' })}`,
@@ -227,7 +265,7 @@ export function healthMiddleware() {
       '',
       '<b>Suggestions</b>',
       ...(aiStyle ? [esc(aiStyle)] : []),
-      ...(ai ? [esc(ai)] : tips.concat(pTips.slice(0, 3)).map(t => `• ${esc(t)}`)),
+      ...(ai ? [esc(ai)] : scoreTips.concat(pTips.slice(0, 3)).map(t => `• ${esc(t)}`)),
     ];
     return ctx.reply(lines.join('\n'), { parse_mode: 'HTML', disable_web_page_preview: true });
   });
