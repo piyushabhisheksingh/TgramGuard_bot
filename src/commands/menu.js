@@ -19,6 +19,8 @@ export const adminCommands = [
   { command: 'user_stats', description: 'Show user stats (reply/id)' },
   { command: 'user_stats_global', description: 'Show global user stats' },
   { command: 'health_user', description: 'View health snapshot of a user' },
+  { command: 'health_top_unhealthy', description: 'Top 10 unhealthy in this chat' },
+  { command: 'health_top_unhealthy_global', description: 'Top 10 unhealthy globally' },
   { command: 'rule_chat_enable', description: 'Enable a rule in this chat' },
   { command: 'rule_chat_disable', description: 'Disable a rule in this chat' },
   { command: 'maxlen_chat_set', description: 'Set max message length for chat' },

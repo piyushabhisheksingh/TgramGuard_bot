@@ -4,6 +4,7 @@ import { textHasLink, containsExplicit } from '../filters.js';
 import { computeHealthScore, computeDisciplineScore, categorize, aiAssessment, buildStyleTraits, aiPersonalityAssessment } from '../health/score.js';
 import { classifyText as aiClassifyText } from '../ai/provider_openai.js';
 import { getSettings } from '../store/settings.js';
+import { getSupabase } from '../store/supabase.js';
 
 function esc(s = '') {
   return String(s).replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
@@ -234,6 +235,134 @@ export function healthMiddleware() {
     const uid = ctx.from?.id; if (!Number.isFinite(uid)) return;
     await setOptOut(uid, false);
     return ctx.reply('Health tracking enabled. Use /health for your snapshot.');
+  });
+
+  // Top 10 unhealthy in current chat (admins/owner only). Requires Supabase.
+  composer.command('health_top_unhealthy', async (ctx) => {
+    if (!(await isBotAdminOrOwner(ctx))) return;
+    const chatId = ctx.chat?.id;
+    if (!Number.isFinite(chatId)) return;
+    const sb = getSupabase();
+    if (!sb) return ctx.reply('This command requires Supabase (SUPABASE_URL/KEY).');
+    try {
+      const { data: pres } = await sb
+        .from('user_chat_presence')
+        .select('user_id')
+        .eq('chat_id', String(chatId))
+        .limit(500);
+      const ids = Array.from(new Set((pres || []).map(r => String(r.user_id))));
+      if (!ids.length) return ctx.reply('No presence data for this chat yet.');
+      const { data: rows } = await sb
+        .from('health_profiles')
+        .select('user_id,data')
+        .in('user_id', ids);
+      const items = [];
+      for (const r of rows || []) {
+        const uid = Number(r.user_id);
+        const doc = r.data || {};
+        // Build minimal summary for health score
+        const daily = doc.daily_counts || {};
+        const now = new Date();
+        const todayKey = (d) => {
+          const y = d.getUTCFullYear();
+          const m = String(d.getUTCMonth() + 1).padStart(2, '0');
+          const dd = String(d.getUTCDate()).padStart(2, '0');
+          return `${y}-${m}-${dd}`;
+        };
+        let w7 = 0, w30 = 0, streak = 0;
+        for (let i = 0; i < 30; i++) {
+          const d = new Date(now); d.setUTCDate(d.getUTCDate() - i);
+          const key = todayKey(d);
+          const c = daily[key] || 0;
+          if (i < 7) w7 += c;
+          w30 += c;
+          if (c > 0 && streak === i) streak += 1;
+        }
+        const act = Array.isArray(doc.activity_by_hour) ? doc.activity_by_hour : Array.from({length:24},()=>0);
+        const hours = act.map((v, h) => ({ h, v })).sort((a, b) => (b.v - a.v));
+        const topHours = hours.slice(0, 3).filter(x => (x.v || 0) > 0).map(x => x.h);
+        const summary = {
+          week_count: w7,
+          month_count: w30,
+          streak_days: streak,
+          top_hours: topHours,
+          avg_message_len: doc.messages ? Math.round((doc.chars_sum || 0) / doc.messages) : (doc.avg_message_len || 0),
+          sessions: { total: (doc.sessions_by_hour || []).reduce((a,b)=>a+(b||0),0), by_hour: doc.sessions_by_hour || [], late_total: (doc.sessions_by_hour||[]).reduce((acc,v,h)=>acc+((h<=5||h>=22)?(v||0):0),0) },
+          comms: doc.comms || {},
+        };
+        const h = computeHealthScore(summary);
+        const dsc = await computeDisciplineScore(uid, chatId);
+        const severity = (100 - h.score) + (100 - dsc.score);
+        items.push({ userId: uid, severity, health: h.score, discipline: dsc.score });
+      }
+      items.sort((a, b) => (b.severity - a.severity));
+      const top = items.slice(0, 10);
+      if (!top.length) return ctx.reply('No candidates found.');
+      const lines = top.map((it, i) => `${i + 1}. <code>${it.userId}</code> — sev: <b>${Math.round(it.severity)}</b>, health: ${it.health}, discipline: ${it.discipline}`);
+      return ctx.reply([`<b>Top ${top.length} unhealthy users in this chat</b>`, ...lines].join('\n'), { parse_mode: 'HTML', disable_web_page_preview: true });
+    } catch (e) {
+      return ctx.reply(`Failed to compute: ${e?.message || e}`);
+    }
+  });
+
+  // Top 10 unhealthy globally (admins/owner only). Requires Supabase.
+  composer.command('health_top_unhealthy_global', async (ctx) => {
+    if (!(await isBotAdminOrOwner(ctx))) return;
+    const sb = getSupabase();
+    if (!sb) return ctx.reply('This command requires Supabase (SUPABASE_URL/KEY).');
+    try {
+      // Limit to a reasonable number to avoid heavy scans
+      const { data: rows } = await sb
+        .from('health_profiles')
+        .select('user_id,data')
+        .limit(500);
+      const items = [];
+      for (const r of rows || []) {
+        const uid = Number(r.user_id);
+        const doc = r.data || {};
+        const daily = doc.daily_counts || {};
+        const now = new Date();
+        const todayKey = (d) => {
+          const y = d.getUTCFullYear();
+          const m = String(d.getUTCMonth() + 1).padStart(2, '0');
+          const dd = String(d.getUTCDate()).padStart(2, '0');
+          return `${y}-${m}-${dd}`;
+        };
+        let w7 = 0, w30 = 0, streak = 0;
+        for (let i = 0; i < 30; i++) {
+          const d = new Date(now); d.setUTCDate(d.getUTCDate() - i);
+          const key = todayKey(d);
+          const c = daily[key] || 0;
+          if (i < 7) w7 += c;
+          w30 += c;
+          if (c > 0 && streak === i) streak += 1;
+        }
+        const act = Array.isArray(doc.activity_by_hour) ? doc.activity_by_hour : Array.from({length:24},()=>0);
+        const hours = act.map((v, h) => ({ h, v })).sort((a, b) => (b.v - a.v));
+        const topHours = hours.slice(0, 3).filter(x => (x.v || 0) > 0).map(x => x.h);
+        const summary = {
+          week_count: w7,
+          month_count: w30,
+          streak_days: streak,
+          top_hours: topHours,
+          avg_message_len: doc.messages ? Math.round((doc.chars_sum || 0) / doc.messages) : (doc.avg_message_len || 0),
+          sessions: { total: (doc.sessions_by_hour || []).reduce((a,b)=>a+(b||0),0), by_hour: doc.sessions_by_hour || [], late_total: (doc.sessions_by_hour||[]).reduce((acc,v,h)=>acc+((h<=5||h>=22)?(v||0):0),0) },
+          comms: doc.comms || {},
+        };
+        const h = computeHealthScore(summary);
+        // Discipline score without chatId: global violations perspective
+        const dsc = await computeDisciplineScore(uid, null);
+        const severity = (100 - h.score) + (100 - dsc.score);
+        items.push({ userId: uid, severity, health: h.score, discipline: dsc.score });
+      }
+      items.sort((a, b) => (b.severity - a.severity));
+      const top = items.slice(0, 10);
+      if (!top.length) return ctx.reply('No candidates found.');
+      const lines = top.map((it, i) => `${i + 1}. <code>${it.userId}</code> — sev: <b>${Math.round(it.severity)}</b>, health: ${it.health}, discipline: ${it.discipline}`);
+      return ctx.reply([`<b>Top ${top.length} unhealthy users (global)</b>`, ...lines].join('\n'), { parse_mode: 'HTML', disable_web_page_preview: true });
+    } catch (e) {
+      return ctx.reply(`Failed to compute: ${e?.message || e}`);
+    }
   });
 
   return composer;
