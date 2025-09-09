@@ -17,6 +17,14 @@ async function ensureFile() {
 let cache = null;
 const USE_SUPABASE = Boolean(process.env.SUPABASE_URL && process.env.SUPABASE_KEY);
 let LAST_USER_ID = null; // hint for save() when using Supabase
+// Supabase optimization knobs
+const HYDRATE_TTL_MS = Number(process.env.HEALTH_SB_USER_TTL_MS || 5 * 60 * 1000); // 5m
+const SAVE_DEBOUNCE_MS = Number(process.env.HEALTH_SB_SAVE_DEBOUNCE_MS || 3000); // 3s
+const OPTOUT_TTL_MS = Number(process.env.HEALTH_SB_OPTOUT_TTL_MS || 5 * 60 * 1000); // 5m
+// In-memory caches
+const hydrateMeta = new Map(); // userId -> { until }
+const saveTimers = new Map(); // userId -> Timeout
+const optOutCache = new Map(); // userId -> { until, value }
 
 async function load() {
   if (cache) return cache;
@@ -35,7 +43,10 @@ async function save(current) {
     try {
       const uid = String(LAST_USER_ID);
       const doc = cache.user_profiles?.[uid];
-      if (doc) await sbSaveUser(uid, doc);
+      if (doc) {
+        // Debounced per-user save to reduce write amplification
+        scheduleSave(uid, doc);
+      }
       return;
     } catch {}
   }
@@ -159,12 +170,15 @@ async function sbSetOptOut(userId, flag) {
       const { error } = await sb
         .from('health_optout')
         .upsert({ user_id: String(userId) }, { onConflict: 'user_id' });
+      // Update local cache
+      optOutCache.set(String(userId), { until: Date.now() + OPTOUT_TTL_MS, value: true });
       return !error;
     } else {
       const { error } = await sb
         .from('health_optout')
         .delete()
         .eq('user_id', String(userId));
+      optOutCache.set(String(userId), { until: Date.now() + OPTOUT_TTL_MS, value: false });
       return !error;
     }
   } catch {
@@ -173,7 +187,15 @@ async function sbSetOptOut(userId, flag) {
 }
 
 export async function isOptedOut(userId) {
-  if (USE_SUPABASE) return sbIsOptedOut(userId);
+  if (USE_SUPABASE) {
+    const key = String(userId);
+    const c = optOutCache.get(key);
+    const now = Date.now();
+    if (c && c.until > now) return Boolean(c.value);
+    const v = await sbIsOptedOut(userId);
+    optOutCache.set(key, { until: now + OPTOUT_TTL_MS, value: Boolean(v) });
+    return Boolean(v);
+  }
   const s = await load();
   return s.opt_out.includes(String(userId));
 }
@@ -204,15 +226,7 @@ function hasLinkQuick(s = '') {
 export async function recordActivity({ userId, chatId, type = 'message', textLen = 0, when = new Date(), content = '' }) {
   if (!Number.isFinite(userId) || !Number.isFinite(chatId)) return;
   const s = await load();
-  if (USE_SUPABASE) {
-    try {
-      const existing = await sbLoadUser(userId);
-      if (existing) {
-        if (!s.user_profiles) s.user_profiles = {};
-        s.user_profiles[String(userId)] = existing;
-      }
-    } catch {}
-  }
+  await sbEnsureUserLoaded(userId, s);
   if (s.opt_out.includes(String(userId))) return;
   const p = ensureProfile(s, userId);
   LAST_USER_ID = String(userId);
@@ -264,15 +278,7 @@ export async function recordActivity({ userId, chatId, type = 'message', textLen
 
 export async function getUserSummary(userId) {
   const s = await load();
-  if (USE_SUPABASE) {
-    try {
-      const existing = await sbLoadUser(userId);
-      if (existing) {
-        if (!s.user_profiles) s.user_profiles = {};
-        s.user_profiles[String(userId)] = existing;
-      }
-    } catch {}
-  }
+  await sbEnsureUserLoaded(userId, s);
   const p = s.user_profiles[String(userId)];
   if (!p) return null;
   // Compute last 7d and 30d counts
@@ -316,15 +322,7 @@ export async function getUserSummary(userId) {
 export async function applyAIMetrics(userId, { toxicity = 0, sexual = 0 } = {}) {
   if (!Number.isFinite(userId)) return;
   const s = await load();
-  if (USE_SUPABASE) {
-    try {
-      const existing = await sbLoadUser(userId);
-      if (existing) {
-        if (!s.user_profiles) s.user_profiles = {};
-        s.user_profiles[String(userId)] = existing;
-      }
-    } catch {}
-  }
+  await sbEnsureUserLoaded(userId, s);
   const p = ensureProfile(s, userId);
   LAST_USER_ID = String(userId);
   const c = p.comms;
@@ -336,15 +334,7 @@ export async function applyAIMetrics(userId, { toxicity = 0, sexual = 0 } = {}) 
 
 export async function getUserProfile(userId) {
   const s = await load();
-  if (USE_SUPABASE) {
-    try {
-      const existing = await sbLoadUser(userId);
-      if (existing) {
-        if (!s.user_profiles) s.user_profiles = {};
-        s.user_profiles[String(userId)] = existing;
-      }
-    } catch {}
-  }
+  await sbEnsureUserLoaded(userId, s);
   const p = ensureProfile(s, userId);
   return p.profile;
 }
@@ -352,15 +342,7 @@ export async function getUserProfile(userId) {
 export async function recordProfileSnapshot({ userId, first_name = '', last_name = '', username = '', bio = '', when = new Date() }) {
   if (!Number.isFinite(userId)) return;
   const s = await load();
-  if (USE_SUPABASE) {
-    try {
-      const existing = await sbLoadUser(userId);
-      if (existing) {
-        if (!s.user_profiles) s.user_profiles = {};
-        s.user_profiles[String(userId)] = existing;
-      }
-    } catch {}
-  }
+  await sbEnsureUserLoaded(userId, s);
   if (s.opt_out.includes(String(userId))) return;
   const p = ensureProfile(s, userId);
   LAST_USER_ID = String(userId);
@@ -391,4 +373,36 @@ export async function recordProfileSnapshot({ userId, first_name = '', last_name
   pr.bio = String(bio || '');
   pr.last_checked_ts = nowIso;
   await save(s);
+}
+
+// ---------- Local helpers for hydration and debounced saving ----------
+async function sbEnsureUserLoaded(userId, state) {
+  if (!USE_SUPABASE) return;
+  const key = String(userId);
+  const now = Date.now();
+  const meta = hydrateMeta.get(key);
+  if (meta && meta.until > now && state.user_profiles && state.user_profiles[key]) return;
+  try {
+    const existing = await sbLoadUser(userId);
+    if (existing) {
+      if (!state.user_profiles) state.user_profiles = {};
+      state.user_profiles[key] = existing;
+    }
+    hydrateMeta.set(key, { until: now + HYDRATE_TTL_MS });
+  } catch {
+    hydrateMeta.set(key, { until: now + HYDRATE_TTL_MS });
+  }
+}
+
+function scheduleSave(userId, doc) {
+  if (!USE_SUPABASE) return;
+  const key = String(userId);
+  if (saveTimers.has(key)) return;
+  const t = setTimeout(async () => {
+    saveTimers.delete(key);
+    try { await sbSaveUser(key, doc); } catch {}
+  }, SAVE_DEBOUNCE_MS);
+  // In Node, unref timer to not block shutdown
+  if (typeof t.unref === 'function') t.unref();
+  saveTimers.set(key, t);
 }
