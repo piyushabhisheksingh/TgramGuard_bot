@@ -111,9 +111,9 @@ function normalizeForExplicit(input = '') {
   s = s.replace(/[01!34@\$5789µаеорсхуіїјαβγδεζηικλμνξοπρσςτυφχψω٠-٩०-९]/g, (ch) => map[ch] || ch);
   // Transliterate Devanagari → Latin (rough mapping) to catch mixed-script abuse
   s = transliterateDevanagari(s);
-  // Remove separators, punctuation, symbols (Unicode-aware) to collapse obfuscations like s.e.x, s_e-x, s•e•x
+  // Remove separators, whitespace, punctuation, symbols (Unicode-aware) to collapse obfuscations like s e x, s.e.x, s_e-x, s•e•x
   try {
-    s = s.replace(/[\p{P}\p{S}]+/gu, '');
+    s = s.replace(/[\p{Z}\s\p{P}\p{S}]+/gu, '');
   } catch {
     // Fallback for environments without Unicode property escapes
     s = s.replace(/[\s._\-\|*`'"~^+\=\/\\()\[\]{}:,;<>]+/g, '');
