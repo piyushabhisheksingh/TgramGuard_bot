@@ -10,6 +10,13 @@ function esc(s = '') {
   return String(s).replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
 }
 
+function mentionHTML(user) {
+  const id = user?.id;
+  const name = [user?.first_name, user?.last_name].filter(Boolean).join(' ') || 'user';
+  if (!Number.isFinite(id)) return esc(name);
+  return `<a href="tg://user?id=${id}">${esc(name)}</a>`;
+}
+
 function isBotOwner(ctx) {
   const userId = ctx.from?.id;
   const ownerId = Number(process.env.BOT_OWNER_ID || NaN);
@@ -125,7 +132,7 @@ export function healthMiddleware() {
         ];
         const pTips = buildPersonalitySuggestions(summary.profile || {});
         const msg = [
-          '<b>Gentle Reminder</b> — your recent activity suggests you could benefit from a healthier routine.',
+          `${mentionHTML(ctx.from)} — <b>Gentle Reminder</b> your recent activity suggests you could benefit from a healthier routine.`,
           `Health score: <b>${health.score}</b> (${catH.label}); Discipline score: <b>${discipline.score}</b> (${catD.label}).`,
           aiStyle ? aiStyle : undefined,
           ai ? ai : `Tips:\n• ${esc(tips.concat(pTips.slice(0, 3)).join('\n• '))}`,
@@ -172,7 +179,7 @@ export function healthMiddleware() {
     const aiStyle = await aiPersonalityAssessment(summary);
     const hourFmt = (h) => `${String(h).padStart(2, '0')}:00`;
     const lines = [
-      `<b>Your Health Routine Snapshot</b>`,
+      `<b>Your Health Routine Snapshot</b> — ${mentionHTML(ctx.from)}`,
       `Last seen: <code>${esc(summary.last_seen || '-')}</code>`,
       `7-day activity: <b>${summary.week_count}</b> · 30-day: <b>${summary.month_count}</b> · Streak: <b>${summary.streak_days}d</b>`,
       `Top hours: ${summary.top_hours.length ? summary.top_hours.map(hourFmt).join(', ') : '-'}`,
@@ -209,7 +216,7 @@ export function healthMiddleware() {
     const aiStyle = await aiPersonalityAssessment(summary);
     const hourFmt = (h) => `${String(h).padStart(2, '0')}:00`;
     const lines = [
-      `<b>User ${targetId} — Health Snapshot</b>`,
+      `<b>Health Snapshot</b> — ${mentionHTML(replyFrom || { id: targetId, first_name: 'User' })}`,
       `Last seen: <code>${esc(summary.last_seen || '-')}</code>`,
       `7-day: <b>${summary.week_count}</b> · 30-day: <b>${summary.month_count}</b> · Streak: <b>${summary.streak_days}d</b>`,
       `Top hours: ${summary.top_hours.length ? summary.top_hours.map(hourFmt).join(', ') : '-'}`,
