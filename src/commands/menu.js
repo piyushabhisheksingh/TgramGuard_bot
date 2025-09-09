@@ -5,6 +5,7 @@ export const defaultCommands = [
   { command: 'help', description: 'Show help and commands' },
   { command: 'ping', description: 'Check bot availability' },
   { command: 'settings', description: 'Show settings help' },
+  { command: 'health', description: 'Your activity snapshot + tips' },
   { command: 'rules_status', description: 'Show rules status' },
   { command: 'group_stats', description: "Show this chat's stats" },
   { command: 'user_stats', description: 'Show your stats (or reply/id)' },
@@ -17,6 +18,7 @@ export const adminCommands = [
   { command: 'group_stats', description: "Show this chat's stats" },
   { command: 'user_stats', description: 'Show user stats (reply/id)' },
   { command: 'user_stats_global', description: 'Show global user stats' },
+  { command: 'health_user', description: 'View health snapshot of a user' },
   { command: 'rule_chat_enable', description: 'Enable a rule in this chat' },
   { command: 'rule_chat_disable', description: 'Disable a rule in this chat' },
   { command: 'maxlen_chat_set', description: 'Set max message length for chat' },
@@ -39,4 +41,3 @@ export const ownerPrivateCommands = [
   { command: 'set_mycommands', description: 'Publish command menus' },
   { command: 'remove_mycommands', description: 'Clear command menus' },
 ];
-

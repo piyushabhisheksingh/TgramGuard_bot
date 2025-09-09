@@ -6,6 +6,7 @@ import throttlerModule from '@grammyjs/transformer-throttler';
 import http from 'node:http';
 import { securityMiddleware } from './middleware/security.js';
 import { settingsMiddleware } from './middleware/settings.js';
+import { healthMiddleware } from './middleware/health.js';
 import { bootstrapAdminsFromEnv, areCommandsInitialized, markCommandsInitialized } from './store/settings.js';
 import { logActionPinned, recordUserPresence } from './logger.js';
 import { defaultCommands, adminCommands, ownerPrivateCommands } from './commands/menu.js';
@@ -41,6 +42,9 @@ bot.use(securityMiddleware());
 
 // Settings middleware and commands
 bot.use(settingsMiddleware());
+
+// Health middleware: track user activity and offer suggestions
+bot.use(healthMiddleware());
 
 // (message and edited_message handling moved into security middleware)
 
