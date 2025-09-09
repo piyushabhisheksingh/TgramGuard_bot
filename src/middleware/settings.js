@@ -19,6 +19,7 @@ import {
 } from '../store/settings.js';
 import { consumeReview } from '../logger.js';
 import { addSafeTerms, addExplicitTerms } from '../filters/customTerms.js';
+import { defaultCommands, adminCommands, ownerPrivateCommands } from '../commands/menu.js';
 import { addExplicitRuntime, containsExplicit } from '../filters.js';
 
 // Utilities shared with security middleware (re-implemented minimal)
@@ -805,56 +806,13 @@ export function settingsMiddleware() {
     if (!(await isBotAdminOrOwner(ctx))) return;
     try {
       // Default (all users) concise commands
-      await ctx.api.setMyCommands(
-        [
-          { command: 'start', description: 'Add bot to a group' },
-          { command: 'help', description: 'Show help and commands' },
-          { command: 'ping', description: 'Check bot availability' },
-          { command: 'settings', description: 'Show settings help' },
-          { command: 'rules_status', description: 'Show rules status' },
-          { command: 'group_stats', description: 'Show this chat\'s stats' },
-          { command: 'user_stats', description: 'Show your stats (or reply/id)' },
-          { command: 'user_stats_global', description: 'Show your global stats' },
-          { command: 'top_violators', description: 'List top violators' },
-        ],
-        { scope: { type: 'default' } }
-      );
+      await ctx.api.setMyCommands(defaultCommands, { scope: { type: 'default' } });
 
       // Admin commands menu for all chat administrators
-      await ctx.api.setMyCommands(
-        [
-          { command: 'rules_status', description: 'Show rules status' },
-          { command: 'group_stats', description: 'Show this chat\'s stats' },
-          { command: 'user_stats', description: 'Show user stats (reply/id)' },
-          { command: 'user_stats_global', description: 'Show global user stats' },
-          { command: 'rule_chat_enable', description: 'Enable a rule in this chat' },
-          { command: 'rule_chat_disable', description: 'Disable a rule in this chat' },
-          { command: 'maxlen_chat_set', description: 'Set max message length for chat' },
-          { command: 'whitelist_add', description: 'Whitelist a user ID in this chat' },
-          { command: 'whitelist_remove', description: 'Remove a whitelisted user ID' },
-          { command: 'whitelist_list', description: 'List chat whitelist' },
-          { command: 'top_violators', description: 'List top violators' },
-        ],
-        { scope: { type: 'all_chat_administrators' } }
-      );
+      await ctx.api.setMyCommands(adminCommands, { scope: { type: 'all_chat_administrators' } });
 
       // Owner-level commands (optional): set for all private chats to reduce clutter in groups
-      await ctx.api.setMyCommands(
-        [
-          { command: 'bot_stats', description: 'Show bot-wide stats' },
-          { command: 'botadmin_add', description: 'Add a bot admin (owner only)' },
-          { command: 'botadmin_remove', description: 'Remove a bot admin' },
-          { command: 'rule_global_enable', description: 'Enable a rule globally' },
-          { command: 'rule_global_disable', description: 'Disable a rule globally' },
-          { command: 'maxlen_global_set', description: 'Set global max length' },
-          { command: 'user_stats', description: 'Show user stats (reply/id)' },
-          { command: 'user_stats_global', description: 'Show global user stats' },
-          { command: 'user_groups', description: 'Show user group presence' },
-          { command: 'set_mycommands', description: 'Publish command menus' },
-          { command: 'remove_mycommands', description: 'Clear command menus' },
-        ],
-        { scope: { type: 'all_private_chats' } }
-      );
+      await ctx.api.setMyCommands(ownerPrivateCommands, { scope: { type: 'all_private_chats' } });
 
       return ctx.reply('Bot commands have been set.');
     } catch (e) {
