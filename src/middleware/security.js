@@ -553,7 +553,19 @@ export function securityMiddleware() {
       return;
     }
 
-    // No violations; continue to next middleware/handlers
+    // No violations; schedule auto-delete if configured
+    try {
+      const { getEffectiveAutoDeleteSeconds } = await import('../store/settings.js');
+      const seconds = await getEffectiveAutoDeleteSeconds(ctx.chat.id);
+      if (Number.isFinite(seconds) && seconds > 0) {
+        const chatId = ctx.chat.id;
+        const messageId = msg.message_id;
+        setTimeout(() => {
+          ctx.api.deleteMessage(chatId, messageId).catch(() => {});
+        }, Math.max(1, Math.trunc(seconds)) * 1000);
+      }
+    } catch {}
+    // Continue to next middleware/handlers
     return next();
   };
 }

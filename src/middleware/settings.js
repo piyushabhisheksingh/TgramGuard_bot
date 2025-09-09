@@ -11,6 +11,9 @@ import {
   setGlobalMaxLenLimit,
   setChatMaxLenLimit,
   getEffectiveMaxLen,
+  setGlobalAutoDeleteSeconds,
+  setChatAutoDeleteSeconds,
+  getEffectiveAutoDeleteSeconds,
   addChatWhitelistUser,
   removeChatWhitelistUser,
   getChatWhitelist,
@@ -71,6 +74,9 @@ function formatRulesStatus(globalRules, chatRules, effective, limits) {
   lines.push('Limits:');
   lines.push(
     `- max_len: effective ${limits.effectiveMax} (global ${limits.globalMax}, chat ${limits.chatMax ?? '-'})`
+  );
+  lines.push(
+    `- auto_delete: effective ${limits.autodelEff ?? 0}s (global ${limits.autodelGlobal ?? 0}s, chat ${limits.autodelChat ?? '-'})`
   );
   return lines.join('\n');
 }
@@ -398,12 +404,14 @@ export function settingsMiddleware() {
       '  /rule_global_enable <rule> — enable a rule globally',
       '  /rule_global_disable <rule> — disable a rule globally',
       '  /maxlen_global_set <n> — set global max length limit',
+      '  /autodel_global_set <seconds> — set global auto-delete time (0 disables)',
       '  /user_groups [user_id] [limit] — show user presence count and group links',
       '  /bot_stats — show bot-wide moderation stats',
       'Group owner/admin (with ban rights), bot admin or owner:',
       '  /rule_chat_enable <rule> — enable a rule for this chat',
       '  /rule_chat_disable <rule> — disable a rule for this chat',
       '  /maxlen_chat_set <n> — set max length limit for this chat',
+      '  /autodel_chat_set <seconds> — set auto-delete time for this chat (0 disables)',
       '  /whitelist_add <user_id> — or reply to a user to whitelist',
       '  /whitelist_remove <user_id> — or reply to a user to unwhitelist',
       '  /whitelist_list — show chat whitelist',
@@ -717,10 +725,16 @@ export function settingsMiddleware() {
     const effectiveMax = await getEffectiveMaxLen(chatId);
     const globalMax = s.global_limits?.max_len ?? DEFAULT_LIMITS.max_len;
     const chatMax = await getChatMaxLen(chatId);
+    const autodelEff = await getEffectiveAutoDeleteSeconds(chatId);
+    const autodelGlobal = s.global_limits?.autodel_sec ?? DEFAULT_LIMITS.autodel_sec;
+    const autodelChat = s.chat_limits?.[String(chatId)]?.autodel_sec;
     const msg = formatRulesStatus(s.global_rules, chatRules, effective, {
       effectiveMax,
       globalMax,
       chatMax,
+      autodelEff,
+      autodelGlobal,
+      autodelChat,
     });
     return ctx.reply(`📋 <b>Rules status</b>\n${esc(msg)}`, { parse_mode: 'HTML' });
   });
@@ -744,6 +758,27 @@ export function settingsMiddleware() {
     await setChatMaxLenLimit(String(ctx.chat.id), n);
     await logAction(ctx, { action: 'maxlen_chat_set', action_type: 'settings', chat: ctx.chat, violation: '-', content: `Chat max_len=${Math.trunc(n)}` });
     return ctx.reply(`✅ <b>Chat max length limit:</b> <code>${Math.trunc(n)}</code>`, { parse_mode: 'HTML' });
+  });
+
+  // Auto-delete settings
+  composer.command('autodel_global_set', async (ctx) => {
+    if (!(await isBotAdminOrOwner(ctx))) return;
+    const n = Number(ctx.message.text.trim().split(/\s+/, 2)[1]);
+    if (!Number.isFinite(n)) return ctx.reply('💡 <b>Usage:</b> <code>/autodel_global_set &lt;seconds&gt;</code>', { parse_mode: 'HTML' });
+    await setGlobalAutoDeleteSeconds(n);
+    await logAction(ctx, { action: 'autodel_global_set', action_type: 'settings', chat: ctx.chat, violation: '-', content: `Global autodel_sec=${Math.trunc(n)}` });
+    return ctx.reply(`✅ <b>Global auto-delete:</b> <code>${Math.trunc(n)}</code> seconds`, { parse_mode: 'HTML' });
+  });
+
+  composer.command('autodel_chat_set', async (ctx) => {
+    const userId = ctx.from?.id;
+    const ok = (await isBotAdminOrOwner(ctx)) || (await isChatAdminWithBan(ctx, userId));
+    if (!ok) return;
+    const n = Number(ctx.message.text.trim().split(/\s+/, 2)[1]);
+    if (!Number.isFinite(n)) return ctx.reply('💡 <b>Usage:</b> <code>/autodel_chat_set &lt;seconds&gt;</code>', { parse_mode: 'HTML' });
+    await setChatAutoDeleteSeconds(String(ctx.chat.id), n);
+    await logAction(ctx, { action: 'autodel_chat_set', action_type: 'settings', chat: ctx.chat, violation: '-', content: `Chat autodel_sec=${Math.trunc(n)}` });
+    return ctx.reply(`✅ <b>Chat auto-delete:</b> <code>${Math.trunc(n)}</code> seconds`, { parse_mode: 'HTML' });
   });
 
   // Chat whitelist commands (chat admin with ban rights, or bot admin/owner)

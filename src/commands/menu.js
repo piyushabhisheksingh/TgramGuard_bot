@@ -21,6 +21,7 @@ export const adminCommands = [
   { command: 'health_user', description: 'View health snapshot of a user' },
   { command: 'health_top_unhealthy', description: 'Top 10 unhealthy in this chat' },
   { command: 'health_top_unhealthy_global', description: 'Top 10 unhealthy globally' },
+  { command: 'autodel_chat_set', description: 'Set auto-delete for this chat' },
   { command: 'rule_chat_enable', description: 'Enable a rule in this chat' },
   { command: 'rule_chat_disable', description: 'Disable a rule in this chat' },
   { command: 'maxlen_chat_set', description: 'Set max message length for chat' },
@@ -42,4 +43,5 @@ export const ownerPrivateCommands = [
   { command: 'user_groups', description: 'Show user group presence' },
   { command: 'set_mycommands', description: 'Publish command menus' },
   { command: 'remove_mycommands', description: 'Clear command menus' },
+  { command: 'autodel_global_set', description: 'Set global auto-delete seconds' },
 ];
