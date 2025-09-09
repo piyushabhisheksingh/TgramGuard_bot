@@ -20,6 +20,29 @@ function escapeHtml(s = '') {
     .replaceAll("'", '&#39;');
 }
 
+// Escape for use inside HTML attribute values like href
+function escapeHtmlAttr(s = '') {
+  return String(s)
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#39;');
+}
+
+// Ensure links are in a Telegram-clickable form
+function normalizeUrl(url = '') {
+  let s = String(url || '').trim();
+  if (!s) return '';
+  // Convert @username to https link
+  if (s.startsWith('@') && s.length > 1) return `https://t.me/${s.slice(1)}`;
+  // Add scheme if missing for t.me or telegram.me
+  if (s.startsWith('t.me/')) return `https://${s}`;
+  if (s.startsWith('telegram.me/')) return `https://${s}`;
+  // Otherwise keep as-is (supports https://, http://, tg://, etc.)
+  return s;
+}
+
 function formatUser(user) {
   if (!user) return '-';
   const name = [user.first_name, user.last_name].filter(Boolean).join(' ') || 'user';
@@ -627,7 +650,10 @@ export async function logAction(ctxOrApi, details = {}) {
   lines.push(`<b>Action:</b> ${escapeHtml(action)} (${escapeHtml(actionType)})`);
   lines.push(`<b>Violation:</b> ${escapeHtml(String(violation))}`);
   if (chat) lines.push(`<b>Group:</b> ${formatChat(chat)}`);
-  if (groupLink) lines.push(`<b>Group Link:</b> <a href="${groupLink}">${escapeHtml(groupLink)}</a>`);
+  if (groupLink) {
+    const href = normalizeUrl(groupLink);
+    lines.push(`<b>Group Link:</b> <a href="${escapeHtmlAttr(href)}">${escapeHtml(href)}</a>`);
+  }
   if (user) lines.push(`<b>User:</b> ${formatUser(user)}`);
   if (content) lines.push(`<b>Content:</b> ${content}`);
   lines.push(`<b>Time:</b> ${escapeHtml(ts)}`);
