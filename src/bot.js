@@ -27,6 +27,30 @@ bot.api.config.use(autoRetry());
 // Flood limits: queue API calls to respect Telegram rate limits
 bot.api.config.use(apiThrottler());
 
+// Auto-delete bot's own messages after a delay (default 60s). Exempts log chat.
+(() => {
+  const originalSendMessage = bot.api.sendMessage.bind(bot.api);
+  const FLAG = String(process.env.BOT_REPLY_CLEANUP ?? 'true').toLowerCase();
+  const enabled = FLAG === '1' || FLAG === 'true' || FLAG === 'yes' || FLAG === 'on';
+  const ttlSec = Number(process.env.BOT_REPLY_CLEANUP_SECONDS || 60);
+  const LOG_CHAT_ID = process.env.LOG_CHAT_ID;
+  bot.api.sendMessage = async function(chatId, text, opts) {
+    const res = await originalSendMessage(chatId, text, opts);
+    try {
+      if (!enabled) return res;
+      // Skip logger channel
+      if (LOG_CHAT_ID && String(chatId) === String(LOG_CHAT_ID)) return res;
+      const ms = Math.max(1, Math.trunc(ttlSec)) * 1000;
+      const id = res?.message_id;
+      if (!id) return res;
+      setTimeout(() => {
+        bot.api.deleteMessage(chatId, id).catch(() => {});
+      }, ms);
+    } catch {}
+    return res;
+  };
+})();
+
 // Concurrency safety: ensure per-chat (or user) sequential processing
 bot.use(
   sequentialize((ctx) => {
