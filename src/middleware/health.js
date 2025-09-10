@@ -29,8 +29,18 @@ async function isBotAdminOrOwner(ctx) {
   if (isBotOwner(ctx)) return true;
   try {
     const s = await getSettings();
-    return s.bot_admin_ids.includes(userId);
-  } catch { return false; }
+    if (s.bot_admin_ids.includes(userId)) return true;
+  } catch {}
+  // Also allow chat administrators/owner to use admin commands
+  try {
+    const chatId = ctx.chat?.id || ctx.message?.chat?.id || ctx.callbackQuery?.message?.chat?.id;
+    if (Number.isFinite(chatId)) {
+      const member = await ctx.api.getChatMember(chatId, userId);
+      const status = member?.status;
+      if (status === 'administrator' || status === 'creator') return true;
+    }
+  } catch {}
+  return false;
 }
 
 function buildSuggestions(summary) {
