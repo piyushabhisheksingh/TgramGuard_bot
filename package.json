@@ -11,7 +11,7 @@
     "safelist:format": "node scripts/format_safelist.mjs"
   },
   "engines": {
-    "node": ">=18"
+    "node": ">=20"
   },
   "dependencies": {
     "@grammyjs/auto-retry": "^2.0.2",

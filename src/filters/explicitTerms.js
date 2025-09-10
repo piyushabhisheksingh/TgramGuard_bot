@@ -8,7 +8,7 @@ function genAggressivePhrases() {
   if (!STRICT) return [];
   const relations = [
     // Romanized family terms
-    'maa', 'maa', 'mummy', 'ammi', 'behen', 'bhen', 'bahen', 'bhabhi', 'mami', 'mausi', 'chachi', 'chacha', 'maam',
+    'maa', 'mummy', 'ammi', 'behen', 'bhen', 'bahen', 'bhabhi', 'mami', 'mausi', 'chachi', 'chacha', 'maam',
   ];
   const connectors = ['ki', 'ke'];
   const nuclei = [

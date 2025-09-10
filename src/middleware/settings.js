@@ -31,7 +31,8 @@ async function isChatAdminWithBan(ctx, userId) {
     if (!member) return false;
     if (member.status === 'creator') return true;
     if (member.status === 'administrator') {
-      return Boolean(member.can_restrict_members ?? true);
+      // Require explicit ban/restrict permission; default to false if unknown
+      return Boolean(member.can_restrict_members);
     }
     return false;
   } catch (_) {
