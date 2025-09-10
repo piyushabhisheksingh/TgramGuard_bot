@@ -76,6 +76,39 @@ bot.use(healthMiddleware());
 bot.on('message', recordUserPresence);
 bot.on('edited_message', recordUserPresence);
 
+// Welcome new members with a short intro and rules
+bot.on('message:new_chat_members', async (ctx) => {
+  try {
+    const chatType = ctx.chat?.type;
+    if (!(chatType === 'group' || chatType === 'supergroup')) return;
+    const meId = ctx.me?.id;
+    const members = ctx.msg?.new_chat_members || [];
+    // Filter out bots and the bot itself
+    const humans = members.filter((m) => !m.is_bot && (!meId || m.id !== meId));
+    if (!humans.length) return;
+
+    function esc(s = '') {
+      return String(s).replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
+    }
+    function mention(u) {
+      const name = [u?.first_name, u?.last_name].filter(Boolean).join(' ') || 'user';
+      return `<a href="tg://user?id=${u.id}">${esc(name)}</a>`;
+    }
+
+    const names = humans.map(mention).join(', ');
+    const title = esc(ctx.chat?.title || 'this group');
+    const rules = [
+      '• No links',
+      '• No explicit content',
+      '• Keep it concise, be respectful',
+      '• No edits to messages',
+    ].join('\n');
+
+    const msg = `👋 Welcome ${names} to <b>${title}</b>!\n\nPlease follow the rules:\n${rules}\n\nUse /settings for options.`;
+    await ctx.reply(msg, { parse_mode: 'HTML', disable_web_page_preview: true });
+  } catch (_) {}
+});
+
 // Optional: simple liveness command
 bot.command('ping', (ctx) => ctx.reply('pong'));
 
