@@ -11,9 +11,6 @@ import {
   setGlobalMaxLenLimit,
   setChatMaxLenLimit,
   getEffectiveMaxLen,
-  setGlobalAutoDeleteSeconds,
-  setChatAutoDeleteSeconds,
-  getEffectiveAutoDeleteSeconds,
   addChatWhitelistUser,
   removeChatWhitelistUser,
   getChatWhitelist,
@@ -75,9 +72,6 @@ function formatRulesStatus(globalRules, chatRules, effective, limits) {
   lines.push(
     `- max_len: effective ${limits.effectiveMax} (global ${limits.globalMax}, chat ${limits.chatMax ?? '-'})`
   );
-  lines.push(
-    `- auto_delete: effective ${limits.autodelEff ?? 0}s (global ${limits.autodelGlobal ?? 0}s, chat ${limits.autodelChat ?? '-'})`
-  );
   return lines.join('\n');
 }
 
@@ -95,6 +89,20 @@ export function settingsMiddleware() {
       .sort((a, b) => (b[1] || 0) - (a[1] || 0))
       .map(([k, v]) => `• <code>${esc(k)}</code>: <b>${v}</b>`) // bullet lines
       .join('\n');
+
+  // Reply helper that auto-deletes bot's own messages (configurable)
+  async function replyEphemeral(ctx, text, options = {}) {
+    const enabled = String(process.env.BOT_REPLY_CLEANUP || '').toLowerCase();
+    const doCleanup = enabled === '1' || enabled === 'true' || enabled === 'yes' || enabled === 'on';
+    const seconds = Number(process.env.BOT_REPLY_CLEANUP_SECONDS || 60);
+    const sent = await ctx.reply(text, options);
+    if (doCleanup && sent?.chat?.id && sent?.message_id) {
+      const chatId = sent.chat.id;
+      const mid = sent.message_id;
+      setTimeout(() => { ctx.api.deleteMessage(chatId, mid).catch(() => {}); }, Math.max(1, Math.trunc(seconds)) * 1000);
+    }
+    return sent;
+  }
 
   // -------- Bot/Group stats builders & keyboards --------
   function botStatsKeyboard(format) {
@@ -404,14 +412,12 @@ export function settingsMiddleware() {
       '  /rule_global_enable <rule> — enable a rule globally',
       '  /rule_global_disable <rule> — disable a rule globally',
       '  /maxlen_global_set <n> — set global max length limit',
-      '  /autodel_global_set <seconds> — set global auto-delete time (0 disables)',
       '  /user_groups [user_id] [limit] — show user presence count and group links',
       '  /bot_stats — show bot-wide moderation stats',
       'Group owner/admin (with ban rights), bot admin or owner:',
       '  /rule_chat_enable <rule> — enable a rule for this chat',
       '  /rule_chat_disable <rule> — disable a rule for this chat',
       '  /maxlen_chat_set <n> — set max length limit for this chat',
-      '  /autodel_chat_set <seconds> — set auto-delete time for this chat (0 disables)',
       '  /whitelist_add <user_id> — or reply to a user to whitelist',
       '  /whitelist_remove <user_id> — or reply to a user to unwhitelist',
       '  /whitelist_list — show chat whitelist',
@@ -422,7 +428,7 @@ export function settingsMiddleware() {
       '',
       `Rules: ${RULE_KEYS.join(', ')}`,
     ].join('\n');
-    return ctx.reply(msg);
+    return replyEphemeral(ctx, msg);
   });
 
   // Bot-wide stats (owner or bot admin)
@@ -431,7 +437,7 @@ export function settingsMiddleware() {
     const tokens = ctx.message.text.trim().split(/\s+/);
     const format = tokens.includes('compact') ? 'compact' : 'pretty';
     const html = await buildBotStatsMessage(format);
-    return ctx.reply(html, { parse_mode: 'HTML', disable_web_page_preview: true, reply_markup: botStatsKeyboard(format) });
+    return replyEphemeral(ctx, html, { parse_mode: 'HTML', disable_web_page_preview: true, reply_markup: botStatsKeyboard(format) });
   });
 
   // Per-chat stats (chat admin with ban rights, or bot admin/owner)
@@ -442,7 +448,7 @@ export function settingsMiddleware() {
     const tokens = ctx.message.text.trim().split(/\s+/);
     const format = tokens.includes('compact') ? 'compact' : 'pretty';
     const html = await buildGroupStatsMessage(ctx, format);
-    return ctx.reply(html, { parse_mode: 'HTML', disable_web_page_preview: true, reply_markup: groupStatsKeyboard(format) });
+    return replyEphemeral(ctx, html, { parse_mode: 'HTML', disable_web_page_preview: true, reply_markup: groupStatsKeyboard(format) });
   });
 
   // Top violators (per chat by default). Anyone can view
@@ -476,7 +482,7 @@ export function settingsMiddleware() {
     }));
     const scope = globalFlag ? 'across all chats' : 'in this chat';
     const html = [`<b>Top ${list.length} violators (${esc(scope)}, last ${days}d)</b>`, ...rows].join('\n');
-    return ctx.reply(html, { parse_mode: 'HTML', disable_web_page_preview: true });
+    return replyEphemeral(ctx, html, { parse_mode: 'HTML', disable_web_page_preview: true });
   });
 
   // Toggle handlers for bot/group stats
@@ -524,9 +530,9 @@ export function settingsMiddleware() {
           { text: 'Next ⏭️', callback_data: `ugroups:${targetId}:${nextOff}:${limit}` },
         ]],
       };
-      return ctx.reply(`<b>${esc(header)}</b>\n${esc(lines.join('\n'))}`, { parse_mode: 'HTML', reply_markup: kb, disable_web_page_preview: true });
+      return replyEphemeral(ctx, `<b>${esc(header)}</b>\n${esc(lines.join('\n'))}`, { parse_mode: 'HTML', reply_markup: kb, disable_web_page_preview: true });
     } catch (e) {
-      return ctx.reply(`❌ <b>Failed to fetch presence:</b> <code>${esc(e?.message || String(e))}</code>`, { parse_mode: 'HTML' });
+      return replyEphemeral(ctx, `❌ <b>Failed to fetch presence:</b> <code>${esc(e?.message || String(e))}</code>`, { parse_mode: 'HTML' });
     }
   });
 
@@ -556,7 +562,7 @@ export function settingsMiddleware() {
       try {
         await ctx.editMessageText(`<b>${esc(header)}</b>\n${esc(lines.join('\n'))}`, { parse_mode: 'HTML', reply_markup: kb, disable_web_page_preview: true });
       } catch {
-        await ctx.reply(`<b>${esc(header)}</b>\n${esc(lines.join('\n'))}`, { parse_mode: 'HTML', reply_markup: kb, disable_web_page_preview: true });
+        await replyEphemeral(ctx, `<b>${esc(header)}</b>\n${esc(lines.join('\n'))}`, { parse_mode: 'HTML', reply_markup: kb, disable_web_page_preview: true });
       }
     } catch (_) { }
     return ctx.answerCallbackQuery();
@@ -725,18 +731,12 @@ export function settingsMiddleware() {
     const effectiveMax = await getEffectiveMaxLen(chatId);
     const globalMax = s.global_limits?.max_len ?? DEFAULT_LIMITS.max_len;
     const chatMax = await getChatMaxLen(chatId);
-    const autodelEff = await getEffectiveAutoDeleteSeconds(chatId);
-    const autodelGlobal = s.global_limits?.autodel_sec ?? DEFAULT_LIMITS.autodel_sec;
-    const autodelChat = s.chat_limits?.[String(chatId)]?.autodel_sec;
     const msg = formatRulesStatus(s.global_rules, chatRules, effective, {
       effectiveMax,
       globalMax,
       chatMax,
-      autodelEff,
-      autodelGlobal,
-      autodelChat,
     });
-    return ctx.reply(`📋 <b>Rules status</b>\n${esc(msg)}`, { parse_mode: 'HTML' });
+    return replyEphemeral(ctx, `📋 <b>Rules status</b>\n${esc(msg)}`, { parse_mode: 'HTML' });
   });
 
   // Global and chat max_len setters
@@ -746,7 +746,7 @@ export function settingsMiddleware() {
     if (!Number.isFinite(n)) return ctx.reply('💡 <b>Usage:</b> <code>/maxlen_global_set &lt;number&gt;</code>', { parse_mode: 'HTML' });
     await setGlobalMaxLenLimit(n);
     await logAction(ctx, { action: 'maxlen_global_set', action_type: 'settings', chat: ctx.chat, violation: '-', content: `Global max_len=${Math.trunc(n)}` });
-    return ctx.reply(`✅ <b>Global max length limit:</b> <code>${Math.trunc(n)}</code>`, { parse_mode: 'HTML' });
+    return replyEphemeral(ctx, `✅ <b>Global max length limit:</b> <code>${Math.trunc(n)}</code>`, { parse_mode: 'HTML' });
   });
 
   composer.command('maxlen_chat_set', async (ctx) => {
@@ -757,29 +757,10 @@ export function settingsMiddleware() {
     if (!Number.isFinite(n)) return ctx.reply('💡 <b>Usage:</b> <code>/maxlen_chat_set &lt;number&gt;</code>', { parse_mode: 'HTML' });
     await setChatMaxLenLimit(String(ctx.chat.id), n);
     await logAction(ctx, { action: 'maxlen_chat_set', action_type: 'settings', chat: ctx.chat, violation: '-', content: `Chat max_len=${Math.trunc(n)}` });
-    return ctx.reply(`✅ <b>Chat max length limit:</b> <code>${Math.trunc(n)}</code>`, { parse_mode: 'HTML' });
+    return replyEphemeral(ctx, `✅ <b>Chat max length limit:</b> <code>${Math.trunc(n)}</code>`, { parse_mode: 'HTML' });
   });
 
-  // Auto-delete settings
-  composer.command('autodel_global_set', async (ctx) => {
-    if (!(await isBotAdminOrOwner(ctx))) return;
-    const n = Number(ctx.message.text.trim().split(/\s+/, 2)[1]);
-    if (!Number.isFinite(n)) return ctx.reply('💡 <b>Usage:</b> <code>/autodel_global_set &lt;seconds&gt;</code>', { parse_mode: 'HTML' });
-    await setGlobalAutoDeleteSeconds(n);
-    await logAction(ctx, { action: 'autodel_global_set', action_type: 'settings', chat: ctx.chat, violation: '-', content: `Global autodel_sec=${Math.trunc(n)}` });
-    return ctx.reply(`✅ <b>Global auto-delete:</b> <code>${Math.trunc(n)}</code> seconds`, { parse_mode: 'HTML' });
-  });
-
-  composer.command('autodel_chat_set', async (ctx) => {
-    const userId = ctx.from?.id;
-    const ok = (await isBotAdminOrOwner(ctx)) || (await isChatAdminWithBan(ctx, userId));
-    if (!ok) return;
-    const n = Number(ctx.message.text.trim().split(/\s+/, 2)[1]);
-    if (!Number.isFinite(n)) return ctx.reply('💡 <b>Usage:</b> <code>/autodel_chat_set &lt;seconds&gt;</code>', { parse_mode: 'HTML' });
-    await setChatAutoDeleteSeconds(String(ctx.chat.id), n);
-    await logAction(ctx, { action: 'autodel_chat_set', action_type: 'settings', chat: ctx.chat, violation: '-', content: `Chat autodel_sec=${Math.trunc(n)}` });
-    return ctx.reply(`✅ <b>Chat auto-delete:</b> <code>${Math.trunc(n)}</code> seconds`, { parse_mode: 'HTML' });
-  });
+  // (auto-delete settings removed)
 
   // Chat whitelist commands (chat admin with ban rights, or bot admin/owner)
   composer.command('whitelist_add', async (ctx) => {
@@ -801,7 +782,7 @@ export function settingsMiddleware() {
     }
     await addChatWhitelistUser(String(ctx.chat.id), targetId);
     await logAction(ctx, { action: 'whitelist_add', action_type: 'settings', user: replyFrom || { id: targetId }, chat: ctx.chat, violation: '-', content: `Whitelisted user ${targetId}` });
-    return ctx.reply(`✅ <b>Whitelisted</b> user <code>${targetId}</code> for this chat.`, { parse_mode: 'HTML' });
+    return replyEphemeral(ctx, `✅ <b>Whitelisted</b> user <code>${targetId}</code> for this chat.`, { parse_mode: 'HTML' });
   });
 
   composer.command('whitelist_remove', async (ctx) => {
@@ -823,7 +804,7 @@ export function settingsMiddleware() {
     }
     await removeChatWhitelistUser(String(ctx.chat.id), targetId);
     await logAction(ctx, { action: 'whitelist_remove', action_type: 'settings', user: replyFrom || { id: targetId }, chat: ctx.chat, violation: '-', content: `Removed user ${targetId} from whitelist` });
-    return ctx.reply(`🗑️ <b>Removed</b> user <code>${targetId}</code> from whitelist.`, { parse_mode: 'HTML' });
+    return replyEphemeral(ctx, `🗑️ <b>Removed</b> user <code>${targetId}</code> from whitelist.`, { parse_mode: 'HTML' });
   });
 
   composer.command('whitelist_list', async (ctx) => {
@@ -831,8 +812,8 @@ export function settingsMiddleware() {
     const ok = (await isBotAdminOrOwner(ctx)) || (await isChatAdminWithBan(ctx, userId));
     if (!ok) return;
     const list = await getChatWhitelist(String(ctx.chat.id));
-    if (!list.length) return ctx.reply('ℹ️ <b>Whitelist is empty for this chat.</b>', { parse_mode: 'HTML' });
-    return ctx.reply(`✅ <b>Whitelisted user IDs:</b>\n${list.map((id)=>`• <code>${id}</code>`).join('\n')}`, { parse_mode: 'HTML' });
+    if (!list.length) return replyEphemeral(ctx, 'ℹ️ <b>Whitelist is empty for this chat.</b>', { parse_mode: 'HTML' });
+    return replyEphemeral(ctx, `✅ <b>Whitelisted user IDs:</b>\n${list.map((id)=>`• <code>${id}</code>`).join('\n')}`, { parse_mode: 'HTML' });
   });
 
   // Bot command menu management
@@ -849,9 +830,9 @@ export function settingsMiddleware() {
       // Owner-level commands (optional): set for all private chats to reduce clutter in groups
       await ctx.api.setMyCommands(ownerPrivateCommands, { scope: { type: 'all_private_chats' } });
 
-      return ctx.reply('✅ <b>Bot commands have been set.</b>', { parse_mode: 'HTML' });
+      return replyEphemeral(ctx, '✅ <b>Bot commands have been set.</b>', { parse_mode: 'HTML' });
     } catch (e) {
-      return ctx.reply(`❌ <b>Failed to set commands:</b> <code>${esc(e?.description || e?.message || String(e))}</code>`, { parse_mode: 'HTML' });
+      return replyEphemeral(ctx, `❌ <b>Failed to set commands:</b> <code>${esc(e?.description || e?.message || String(e))}</code>`, { parse_mode: 'HTML' });
     }
   });
 
@@ -861,7 +842,7 @@ export function settingsMiddleware() {
     try {
       await ctx.api.deleteMyCommands({ scope: { type: 'default' } });
       await ctx.api.deleteMyCommands({ scope: { type: 'all_chat_administrators' } });
-      return ctx.reply('🗑️ <b>Bot commands have been removed.</b>', { parse_mode: 'HTML' });
+      return replyEphemeral(ctx, '🗑️ <b>Bot commands have been removed.</b>', { parse_mode: 'HTML' });
     } catch (e) {
       return ctx.reply(`Failed to remove commands: ${e?.description || e?.message || e}`);
     }

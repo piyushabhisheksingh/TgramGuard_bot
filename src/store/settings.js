@@ -286,55 +286,11 @@ export async function getEffectiveMaxLen(chatId) {
   return Number.isFinite(chatLimit) ? chatLimit : globalLimit;
 }
 
-// Auto-delete (seconds) limits
-export async function setGlobalAutoDeleteSeconds(n) {
-  const sec = normalizeSeconds(n);
-  const s = await load();
-  s.global_limits.autodel_sec = sec;
-  await save(s);
-}
-
-export async function setChatAutoDeleteSeconds(chatId, n) {
-  const sec = normalizeSeconds(n);
-  if (USE_SUPABASE) {
-    const current = await getChatSettingsCached(chatId);
-    current.limits.autodel_sec = sec;
-    await sbSaveChat(chatId, current);
-    return;
-  }
-  const s = await load();
-  if (!s.chat_limits[String(chatId)]) s.chat_limits[String(chatId)] = {};
-  s.chat_limits[String(chatId)].autodel_sec = sec;
-  await save(s);
-}
-
-export async function getEffectiveAutoDeleteSeconds(chatId) {
-  const s = await load();
-  let chatLimit;
-  if (USE_SUPABASE) {
-    const chat = (await getChatSettingsCached(chatId))?.limits || {};
-    chatLimit = chat.autodel_sec;
-  } else {
-    const chat = s.chat_limits[String(chatId)] || {};
-    chatLimit = chat.autodel_sec;
-  }
-  const globalLimit = s.global_limits.autodel_sec ?? DEFAULT_LIMITS.autodel_sec;
-  return Number.isFinite(chatLimit) ? chatLimit : globalLimit;
-}
-
 function normalizeLimit(n) {
   const num = Number(n);
   const MAX = 4096; // Telegram hard cap for text messages
   const MIN = 1;
   if (!Number.isFinite(num)) return DEFAULT_LIMITS.max_len;
-  return Math.max(MIN, Math.min(MAX, Math.trunc(num)));
-}
-
-function normalizeSeconds(n) {
-  const num = Number(n);
-  const MAX = 7 * 24 * 60 * 60; // 7 days
-  const MIN = 0; // 0 disables auto-delete
-  if (!Number.isFinite(num)) return DEFAULT_LIMITS.autodel_sec;
   return Math.max(MIN, Math.min(MAX, Math.trunc(num)));
 }
 
