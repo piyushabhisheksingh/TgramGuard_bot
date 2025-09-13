@@ -22,17 +22,21 @@ export function entitiesContainLink(entities = []) {
 
 export function containsExplicit(text = "") {
   if (!text) return false;
-  // Fast path on raw text
-  if (explicitTerms.some((rx) => rx.test(text))) return true;
-  if (runtimeExplicit.some((rx) => rx.test(text))) return true;
-  // Optional: token-based profanity check via `allprofanity` package if installed
-  if (hasProfanityToken(text)) return true;
-  // Obfuscation-aware path: normalize text and run a looser check
+  // Normalize and evaluate against loose patterns so safelist can take effect
   const normalized = normalizeForExplicit(text);
-  if (!explicitTermsLoose.some((rx) => rx.test(normalized)) && !runtimeExplicitLoose.some((rx) => rx.test(normalized))) return false;
-  // Strip safe segments and retest to reduce false positives
+  // Quick precheck: if nothing resembles explicit even before stripping, bail out
+  const preHit =
+    explicitTermsLoose.some((rx) => rx.test(normalized)) ||
+    runtimeExplicitLoose.some((rx) => rx.test(normalized)) ||
+    // Optional: token-based profanity check via `allprofanity` package if installed
+    hasProfanityToken(text);
+  if (!preHit) return false;
+  // Strip safe segments and retest to reduce false positives (e.g., class, analysis, gandhi)
   const stripped = stripSafeSegments(normalized);
-  return explicitTermsLoose.some((rx) => rx.test(stripped)) || runtimeExplicitLoose.some((rx) => rx.test(stripped));
+  return (
+    explicitTermsLoose.some((rx) => rx.test(stripped)) ||
+    runtimeExplicitLoose.some((rx) => rx.test(stripped))
+  );
 }
 
 export function overCharLimit(text = "", limit = 200) {
