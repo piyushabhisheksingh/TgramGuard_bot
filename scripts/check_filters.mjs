@@ -10,8 +10,14 @@ const cases = [
   { text: 'We will analyze and then canal dredging.', expect: false, label: 'analyze/canal (benign)' },
   { text: 'Mahatma Gandhi was a great leader.', expect: false, label: 'gandhi (benign)' },
   { text: 'Shuttlecock and cocktail are sports and drinks.', expect: false, label: 'cocktail/shuttlecock (benign)' },
+  { text: 'Cockroach and cockatoo are animals; Cockney is an accent.', expect: false, label: 'cockroach/cockatoo/cockney (benign)' },
   { text: 'Chem lab: titration today, bring your notebook.', expect: false, label: 'titration (benign)' },
+  { text: 'A tiny titmouse perched on a branch.', expect: false, label: 'titmouse (benign)' },
   { text: 'Geometry uses circumference often.', expect: false, label: 'circumference (benign)' },
+  { text: 'Cumin is a spice used in cooking.', expect: false, label: 'cumin (benign)' },
+  { text: 'He is a sexton at the church; they studied sexagesimal numbers in math.', expect: false, label: 'sexton/sexagesimal (benign)' },
+  { text: 'I live in Essex, not Sussex or Massachusetts.', expect: false, label: 'Essex/Sussex/Massachusetts (benign)' },
+  { text: 'Renew my passport and passphrase.', expect: false, label: 'passport/passphrase (benign)' },
   // Normalized obfuscations still benign
   { text: 'Analy\u00adsis (soft hyphen) remains benign', expect: false, label: 'analysis with soft hyphen' },
   // Explicit tokens — should be true

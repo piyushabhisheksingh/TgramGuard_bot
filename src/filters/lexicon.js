@@ -14,6 +14,7 @@ const baseSafePatterns = [
   /class(ify|ified|ifies|ifying|ic|ical|ics|ism|ist|room|mate|work)/gi,
   /pass(word|code)?/gi,
   /pass(ive|ively|over|through|age|ages|enger|engers)/gi,
+  /passport|passphrase|passbook|passband/gi,
   /assist(ant|ance)?/gi,
   /assign(ment|ing|ed)?/gi,
   /assess(ment|or|ing)?/gi,
@@ -23,6 +24,7 @@ const baseSafePatterns = [
   /passenger(s)?/gi,
   /passage(s)?/gi,
   /assurance(s)?/gi,
+  /mass(achusetts|ive|ively)?/gi,
   // "anal" benign terms
   /analysis|analyst|analytic(s|al)?|analog(y|ic|ical|ue)?/gi,
   /analy(se|ze|ser|zer|sed|zed|sing|zing|sis)/gi,
@@ -31,17 +33,25 @@ const baseSafePatterns = [
   /peacock|cockpit|woodcock|weathercock|hancock/gi,
   /cocktail/gi,
   /shuttlecock|stopcock|ballcock/gi,
+  /cockroach|cockatoo|cockerel|cockney/gi,
   // "dick" benign names/titles
   /dickens|dickinson|riddick/gi,
+  /dickson/gi,
   // "cum" benign terms
   /cumulative|cumulate|accumulate(d|s|ing)?|document|succumb|cucumber|cumlaude/gi,
   /circumstance(s)?|circumference|circumvent(ion)?|circumspect|circumscribe(d|s|ing)?/gi,
+  /cumin/gi,
   // "tit" benign terms
   /title(d|s|r)?|titular|titania|titan(ic|ium)?/gi,
   /titr(ate|ation|ated|ating|ant|ator)s?/gi,
+  /titmouse/gi,
   // Non-explicit uses of sex
   /unisex|asexual/gi,
   /sexagenarian(s)?/gi,
+  /sexagesimal/gi,
+  /sexton(s)?/gi,
+  /sussex|essex/gi,
+  /sex(agesimal|ton)s?/gi,
   // Hinglish/Hindi benign or common phrases that could collide
   /randhir/gi,
   /randhawa/gi,

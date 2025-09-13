@@ -23,7 +23,9 @@ export function entitiesContainLink(entities = []) {
 export function containsExplicit(text = "") {
   if (!text) return false;
   // Normalize and evaluate against loose patterns so safelist can take effect
-  const normalized = normalizeForExplicit(text);
+  let normalized = normalizeForExplicit(text);
+  // Pre-strip common benign collisions with "sex" to reduce noise
+  try { normalized = normalized.replace(/sexagesimal|sexton(s)?/gi, ''); } catch {}
   // Quick precheck: if nothing resembles explicit even before stripping, bail out
   const preHit =
     explicitTermsLoose.some((rx) => rx.test(normalized)) ||
@@ -33,10 +35,16 @@ export function containsExplicit(text = "") {
   if (!preHit) return false;
   // Strip safe segments and retest to reduce false positives (e.g., class, analysis, gandhi)
   const stripped = stripSafeSegments(normalized);
-  return (
-    explicitTermsLoose.some((rx) => rx.test(stripped)) ||
-    runtimeExplicitLoose.some((rx) => rx.test(stripped))
-  );
+  const hitLoose = explicitTermsLoose.some((rx) => rx.test(stripped)) || runtimeExplicitLoose.some((rx) => rx.test(stripped));
+  if (!hitLoose) return false;
+  // Special-case guard: if only 'sex' remains but the raw text contains benign terms like 'sexton' or 'sexagesimal', treat as benign
+  try {
+    if (/sex/i.test(stripped)) {
+      const raw = String(text).toLowerCase();
+      if (/\bsexton(s)?\b/.test(raw) || /\bsexagesimal(s)?\b/.test(raw)) return false;
+    }
+  } catch {}
+  return true;
 }
 
 export function overCharLimit(text = "", limit = 200) {
