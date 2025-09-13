@@ -22,6 +22,13 @@ export function entitiesContainLink(entities = []) {
 
 export function containsExplicit(text = "") {
   if (!text) return false;
+  // Quick raw-text benign guard for common 'sex' compounds
+  try {
+    const raw = String(text).toLowerCase();
+    if (/(^|\b)(sexton(s)?|sexagesimal(s)?|sexagenarian(s)?|unisex|asexual(ly|ity)?|middlesex|wessex|sussex|essex)(\b|$)/.test(raw)) {
+      return false;
+    }
+  } catch {}
   // Normalize and evaluate against loose patterns so safelist can take effect
   let normalized = normalizeForExplicit(text);
   // Pre-strip common benign collisions with "sex" to reduce noise
@@ -41,7 +48,7 @@ export function containsExplicit(text = "") {
   try {
     if (/sex/i.test(stripped)) {
       const raw = String(text).toLowerCase();
-      if (/\bsexton(s)?\b/.test(raw) || /\bsexagesimal(s)?\b/.test(raw)) return false;
+      if (/(^|\b)(sexton(s)?|sexagesimal(s)?|sexagenarian(s)?|unisex|asexual(ly|ity)?|middlesex|wessex|sussex|essex)(\b|$)/.test(raw)) return false;
     }
   } catch {}
   return true;
@@ -66,6 +73,7 @@ const explicitTermsLoose = explicitTerms.map((rx) => {
 // --- Runtime additions for explicit patterns (via /abuse) ---
 const runtimeExplicit = [];
 const runtimeExplicitLoose = [];
+const runtimeExplicitSources = new Set(); // dedupe additions
 export function addExplicitRuntime(terms = []) {
   let added = 0;
   for (const t of terms) {
@@ -73,6 +81,7 @@ export function addExplicitRuntime(terms = []) {
     // Allow /pattern/flags or plain strings
     let rx = null;
     if (typeof t === 'string') {
+      if (runtimeExplicitSources.has(t)) continue;
       const m = t.match(/^\s*\/(.*)\/([a-z]*)\s*$/i);
       if (m) {
         try { rx = new RegExp(m[1], m[2] || 'i'); } catch { rx = null; }
@@ -85,6 +94,7 @@ export function addExplicitRuntime(terms = []) {
       rx = t;
     }
     if (!rx) continue;
+    runtimeExplicitSources.add(typeof t === 'string' ? t : rx.source);
     runtimeExplicit.push(rx);
     // Build loose version for normalized scanning
     const looseSrc = rx.source.replace(/\\b/g, '');
@@ -144,7 +154,15 @@ function currentSafePatterns() {
 
 function stripSafeSegments(normalized = '') {
   let s = normalized;
-  for (const rx of currentSafePatterns()) s = s.replace(rx, '');
+  let count = 0;
+  for (const rx of currentSafePatterns()) {
+    s = s.replace(rx, (m) => {
+      if (count > 5000) return m; // safety guard
+      count += 1;
+      return '';
+    });
+    if (count > 5000) break;
+  }
   return s;
 }
 
