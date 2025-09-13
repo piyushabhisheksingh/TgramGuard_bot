@@ -11,29 +11,42 @@ export const explicitTerms = [...explicitBase, ...customExplicitTerms];
 const baseSafePatterns = [
   // "ass" related benign terms
   /class/gi,
+  /class(ify|ified|ifies|ifying|ic|ical|ics|ism|ist|room|mate|work)/gi,
   /pass(word|code)?/gi,
+  /pass(ive|ively|over|through|age|ages|enger|engers)/gi,
   /assist(ant|ance)?/gi,
   /assign(ment|ing|ed)?/gi,
   /assess(ment|or|ing)?/gi,
   /association|associate/gi,
   /assam(ese)?/gi,
   /passion(ate|ately)?/gi,
+  /passenger(s)?/gi,
+  /passage(s)?/gi,
+  /assurance(s)?/gi,
   // "anal" benign terms
   /analysis|analyst|analytic(s|al)?|analog(y|ic|ical|ue)?/gi,
+  /analy(se|ze|ser|zer|sed|zed|sing|zing|sis)/gi,
+  /canal(s)?/gi,
   // "cock" benign compounds
   /peacock|cockpit|woodcock|weathercock|hancock/gi,
+  /cocktail/gi,
+  /shuttlecock|stopcock|ballcock/gi,
   // "dick" benign names/titles
   /dickens|dickinson|riddick/gi,
   // "cum" benign terms
   /cumulative|cumulate|accumulate(d|s|ing)?|document|succumb|cucumber|cumlaude/gi,
+  /circumstance(s)?|circumference|circumvent(ion)?|circumspect|circumscribe(d|s|ing)?/gi,
   // "tit" benign terms
   /title(d|s|r)?|titular|titania|titan(ic|ium)?/gi,
+  /titr(ate|ation|ated|ating|ant|ator)s?/gi,
   // Non-explicit uses of sex
   /unisex|asexual/gi,
+  /sexagenarian(s)?/gi,
   // Hinglish/Hindi benign or common phrases that could collide
   /randhir/gi,
   /randhawa/gi,
   /gandhi/gi,
+  /shital/gi,
   // Indian names that contain "shit" as a substring (avoid false positives)
   /akshita/gi,
   /ishita/gi,
@@ -91,6 +104,7 @@ const baseSafePatterns = [
   /gandhar/gi,
   /gandharv/gi,
   /gandharva/gi,
+  /gandalf/gi,
   // South-Indian spellings that include "cum" (Tamil transliterations)
   /cumar/gi,
   /cumara/gi,

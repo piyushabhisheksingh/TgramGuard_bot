@@ -145,7 +145,8 @@ function loadModuleWordlist(moduleName) {
 }
 
 // Only whitelist dictionary terms that collide with risky substrings to avoid over-safelisting
-const RISKY_SUBSTRINGS = ['shit', 'tit', 'ass', 'cum', 'gand', 'cock', 'dick'];
+// Expand risky substrings to capture more benign collisions we want to safelist
+const RISKY_SUBSTRINGS = ['shit', 'tit', 'ass', 'cum', 'gand', 'cock', 'dick', 'anal', 'sex'];
 
 function buildSafeFromList(list = []) {
   try {

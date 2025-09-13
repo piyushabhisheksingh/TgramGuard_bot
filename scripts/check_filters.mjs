@@ -5,8 +5,13 @@ import { containsExplicit } from '../src/filters.js';
 const cases = [
   // Safelist false positives — should be false
   { text: 'This is a world class act.', expect: false, label: 'class (benign)' },
+  { text: 'He will classify the books.', expect: false, label: 'classify (benign)' },
   { text: 'We did deep analysis of the data.', expect: false, label: 'analysis (benign)' },
+  { text: 'We will analyze and then canal dredging.', expect: false, label: 'analyze/canal (benign)' },
   { text: 'Mahatma Gandhi was a great leader.', expect: false, label: 'gandhi (benign)' },
+  { text: 'Shuttlecock and cocktail are sports and drinks.', expect: false, label: 'cocktail/shuttlecock (benign)' },
+  { text: 'Chem lab: titration today, bring your notebook.', expect: false, label: 'titration (benign)' },
+  { text: 'Geometry uses circumference often.', expect: false, label: 'circumference (benign)' },
   // Normalized obfuscations still benign
   { text: 'Analy\u00adsis (soft hyphen) remains benign', expect: false, label: 'analysis with soft hyphen' },
   // Explicit tokens — should be true
@@ -31,4 +36,3 @@ if (failures) {
 } else {
   console.log('All filter assertions passed.');
 }
-

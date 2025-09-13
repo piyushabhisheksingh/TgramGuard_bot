@@ -93,8 +93,8 @@ function normalizeForExplicit(input = '') {
   let s = String(input).toLowerCase();
   // Normalize compatibility forms (fullwidth, circled letters, etc.)
   try { s = s.normalize('NFKC'); } catch {}
-  // Remove zero-width and joiner characters
-  s = s.replace(/[\u200B-\u200D\uFEFF\u2060]/g, '');
+  // Remove zero-width, joiner, and soft hyphen characters
+  s = s.replace(/[\u200B-\u200D\uFEFF\u2060\u00AD\u180E]/g, '');
   // NFKD normalize and strip diacritics for Latin script
   try {
     s = s.normalize('NFKD').replace(/\p{M}+/gu, '');
