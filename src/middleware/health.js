@@ -126,76 +126,84 @@ export function healthMiddleware() {
   const lastAdvice = new Map(); // userId -> ts
 
   // Activity tracking across common update types
-  composer.on('message', async (ctx) => {
-    const userId = ctx.from?.id; const chatId = ctx.chat?.id;
-    const text = ctx.message?.text || ctx.message?.caption || '';
-    const len = text.length;
-    await recordActivity({ userId, chatId, type: 'message', textLen: len, when: new Date(), content: text });
-    // Optional AI moderation analysis to enrich comms metrics
+  composer.on('message', async (ctx, next) => {
     try {
-      const enabled = String(process.env.AI_ENABLE || '').toLowerCase();
-      const provider = String(process.env.AI_PROVIDER || '').toLowerCase();
-      if ((enabled === '1' || enabled === 'true') && provider === 'openai' && text) {
-        const r = await aiClassifyText(text);
-        if (r && Number.isFinite(userId)) {
-          const s = r.scores || {};
-          const tox = (s['harassment'] || 0) + (s['harassment/threatening'] || 0) + (s['hate'] || 0) + (s['hate/threatening'] || 0) + (s['violence'] || 0) + (s['insult'] || 0);
-          const sex = s['sexual'] || 0;
-          await applyAIMetrics(userId, { toxicity: tox, sexual: sex });
-        }
-      }
-    } catch {}
-    // Profile snapshot tracking (name/username/bio changes)
-    try {
-      if (Number.isFinite(userId)) {
-        const profile = await getUserProfile(userId);
-        const lastChk = profile?.last_checked_ts ? Date.parse(profile.last_checked_ts) : 0;
-        const bioTtl = Number(process.env.HEALTH_BIO_CHECK_MS || 6 * 60 * 60 * 1000); // 6h
-        let bio = profile?.bio || '';
-        if (!Number.isFinite(lastChk) || (Date.now() - lastChk) > bioTtl) {
-          try { const ch = await ctx.api.getChat(userId); if (ch?.bio) bio = ch.bio; } catch {}
-        }
-        await recordProfileSnapshot({ userId, first_name: ctx.from?.first_name, last_name: ctx.from?.last_name, username: ctx.from?.username, bio });
-      }
-    } catch {}
-    // Auto-guide severe category members occasionally
-    if (Number.isFinite(userId)) {
+      const userId = ctx.from?.id; const chatId = ctx.chat?.id;
+      const text = ctx.message?.text || ctx.message?.caption || '';
+      const len = text.length;
+      await recordActivity({ userId, chatId, type: 'message', textLen: len, when: new Date(), content: text });
+      // Optional AI moderation analysis to enrich comms metrics
       try {
-        if (await isOptedOut(userId)) return;
-        const now = Date.now();
-        const last = lastAdvice.get(userId) || 0;
-        if (now - last < adviseCooldownMs) return;
-        const summary = await getUserSummary(userId);
-        if (!summary) return;
-        const health = computeHealthScore(summary);
-        const discipline = await computeDisciplineScore(userId, chatId);
-        const catH = categorize(health.score);
-        const catD = categorize(discipline.score);
-        const severe = (catH.label === 'Severe') || (catD.label === 'Severe');
-        if (!severe) return;
-        lastAdvice.set(userId, now);
-        const ai = await aiAssessment(summary, discipline);
-        const aiStyle = await aiPersonalityAssessment(summary);
-        const styleTraits = buildStyleTraits(summary);
-        const scoreTips = buildScoreBasedTips(summary, health, discipline, catH, catD, styleTraits);
-        const pTips = buildPersonalitySuggestions(summary.profile || {});
-        const msg = [
-          `🧘 ${mentionHTML(ctx.from)} — <b>Gentle Reminder</b>`,
-          `<b>Scores:</b> Health <b>${health.score}</b> (${catH.label}) · Discipline <b>${discipline.score}</b> (${catD.label})`,
-          aiStyle ? `<b>Style:</b> ${esc(aiStyle)}` : undefined,
-          ai ? `<b>Tips:</b> ${esc(ai)}` : `<b>Tips:</b>\n• ${esc(scoreTips.concat(pTips.slice(0, 2)).slice(0, 5).join('\n• '))}`,
-          '<i>Use /health for a full snapshot or /health_optout to disable.</i>',
-        ].filter(Boolean).join('\n');
-        try { await ctx.reply(msg, { parse_mode: 'HTML', disable_web_page_preview: true }); } catch {}
+        const enabled = String(process.env.AI_ENABLE || '').toLowerCase();
+        const provider = String(process.env.AI_PROVIDER || '').toLowerCase();
+        if ((enabled === '1' || enabled === 'true') && provider === 'openai' && text) {
+          const r = await aiClassifyText(text);
+          if (r && Number.isFinite(userId)) {
+            const s = r.scores || {};
+            const tox = (s['harassment'] || 0) + (s['harassment/threatening'] || 0) + (s['hate'] || 0) + (s['hate/threatening'] || 0) + (s['violence'] || 0) + (s['insult'] || 0);
+            const sex = s['sexual'] || 0;
+            await applyAIMetrics(userId, { toxicity: tox, sexual: sex });
+          }
+        }
       } catch {}
+      // Profile snapshot tracking (name/username/bio changes)
+      try {
+        if (Number.isFinite(userId)) {
+          const profile = await getUserProfile(userId);
+          const lastChk = profile?.last_checked_ts ? Date.parse(profile.last_checked_ts) : 0;
+          const bioTtl = Number(process.env.HEALTH_BIO_CHECK_MS || 6 * 60 * 60 * 1000); // 6h
+          let bio = profile?.bio || '';
+          if (!Number.isFinite(lastChk) || (Date.now() - lastChk) > bioTtl) {
+            try { const ch = await ctx.api.getChat(userId); if (ch?.bio) bio = ch.bio; } catch {}
+          }
+          await recordProfileSnapshot({ userId, first_name: ctx.from?.first_name, last_name: ctx.from?.last_name, username: ctx.from?.username, bio });
+        }
+      } catch {}
+      // Auto-guide severe category members occasionally
+      if (Number.isFinite(userId)) {
+        try {
+          if (await isOptedOut(userId)) return;
+          const now = Date.now();
+          const last = lastAdvice.get(userId) || 0;
+          if (now - last < adviseCooldownMs) return;
+          const summary = await getUserSummary(userId);
+          if (!summary) return;
+          const health = computeHealthScore(summary);
+          const discipline = await computeDisciplineScore(userId, chatId);
+          const catH = categorize(health.score);
+          const catD = categorize(discipline.score);
+          const severe = (catH.label === 'Severe') || (catD.label === 'Severe');
+          if (!severe) return;
+          lastAdvice.set(userId, now);
+          const ai = await aiAssessment(summary, discipline);
+          const aiStyle = await aiPersonalityAssessment(summary);
+          const styleTraits = buildStyleTraits(summary);
+          const scoreTips = buildScoreBasedTips(summary, health, discipline, catH, catD, styleTraits);
+          const pTips = buildPersonalitySuggestions(summary.profile || {});
+          const msg = [
+            `🧘 ${mentionHTML(ctx.from)} — <b>Gentle Reminder</b>`,
+            `<b>Scores:</b> Health <b>${health.score}</b> (${catH.label}) · Discipline <b>${discipline.score}</b> (${catD.label})`,
+            aiStyle ? `<b>Style:</b> ${esc(aiStyle)}` : undefined,
+            ai ? `<b>Tips:</b> ${esc(ai)}` : `<b>Tips:</b>\n• ${esc(scoreTips.concat(pTips.slice(0, 2)).slice(0, 5).join('\n• '))}`,
+            '<i>Use /health for a full snapshot or /health_optout to disable.</i>',
+          ].filter(Boolean).join('\n');
+          try { await ctx.reply(msg, { parse_mode: 'HTML', disable_web_page_preview: true }); } catch {}
+        } catch {}
+      }
+    } finally {
+      await next();
     }
   });
 
-  composer.on('edited_message', async (ctx) => {
-    const userId = ctx.from?.id; const chatId = ctx.chat?.id;
-    const text = ctx.editedMessage?.text || ctx.editedMessage?.caption || '';
-    const len = text.length;
-    await recordActivity({ userId, chatId, type: 'edit', textLen: len, when: new Date(), content: text });
+  composer.on('edited_message', async (ctx, next) => {
+    try {
+      const userId = ctx.from?.id; const chatId = ctx.chat?.id;
+      const text = ctx.editedMessage?.text || ctx.editedMessage?.caption || '';
+      const len = text.length;
+      await recordActivity({ userId, chatId, type: 'edit', textLen: len, when: new Date(), content: text });
+    } finally {
+      await next();
+    }
   });
 
   composer.on('callback_query', async (ctx) => {
