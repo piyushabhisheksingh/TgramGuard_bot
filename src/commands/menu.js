@@ -40,6 +40,7 @@ export const ownerPrivateCommands = [
   { command: 'user_stats', description: 'Show user stats (reply/id)' },
   { command: 'user_stats_global', description: 'Show global user stats' },
   { command: 'user_groups', description: 'Show user group presence' },
+  { command: 'group_kick_all', description: 'DM: kick all members from a group' },
   { command: 'set_mycommands', description: 'Publish command menus' },
   { command: 'remove_mycommands', description: 'Clear command menus' },
 ];

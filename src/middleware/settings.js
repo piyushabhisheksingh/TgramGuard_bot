@@ -1,5 +1,5 @@
 import { Composer } from 'grammy';
-import { logAction, getBotStats, getGroupStats, getUserGroupCount, getUserGroupLinks } from '../logger.js';
+import { logAction, getBotStats, getGroupStats, getUserGroupCount, getUserGroupLinks, getChatPresenceUserIds } from '../logger.js';
 import { RULE_KEYS, DEFAULT_RULES, DEFAULT_LIMITS } from '../rules.js';
 import {
   addBotAdmin,
@@ -538,6 +538,132 @@ export function settingsMiddleware() {
   });
 
   // Pagination handler for user_groups
+  composer.command('group_kick_all', async (ctx) => {
+    if (ctx.chat?.type !== 'private') {
+      return ctx.reply('ℹ️ Run this command in a private chat with the bot.');
+    }
+    if (!(await isBotAdminOrOwner(ctx))) {
+      return ctx.reply('⛔ <b>Admins only</b>', { parse_mode: 'HTML' });
+    }
+    const tokens = ctx.message.text.trim().split(/\s+/);
+    const rawId = tokens[1];
+    const confirm = tokens.slice(2).some((t) => {
+      const val = String(t || '').toLowerCase();
+      return val === 'confirm' || val === '--confirm';
+    });
+    if (!rawId || !confirm) {
+      const usage = [
+        '⚠️ <b>Usage:</b> <code>/group_kick_all &lt;chat_id&gt; confirm</code>',
+        'Chat ID must be the numeric Telegram ID (e.g. <code>-1001234567890</code>).',
+        'The bot removes everyone it has seen in that chat except admins and itself.',
+      ].join('\n');
+      return ctx.reply(usage, { parse_mode: 'HTML' });
+    }
+    const chatId = Number(rawId);
+    if (!Number.isFinite(chatId)) {
+      return ctx.reply('❌ <b>Invalid chat ID.</b> Provide a numeric ID like <code>-1001234567890</code>.', { parse_mode: 'HTML' });
+    }
+    let chat = null;
+    try {
+      chat = await ctx.api.getChat(chatId);
+    } catch (e) {
+      const msg = e?.description || e?.message || String(e);
+      return ctx.reply(`❌ <b>Failed to access chat:</b> <code>${esc(msg)}</code>`, { parse_mode: 'HTML' });
+    }
+    if (chat?.type !== 'supergroup' && chat?.type !== 'group') {
+      return ctx.reply('❌ <b>Target chat must be a group or supergroup.</b>', { parse_mode: 'HTML' });
+    }
+    let adminIds = new Set();
+    try {
+      const admins = await ctx.api.getChatAdministrators(chatId);
+      adminIds = new Set(admins.map((a) => a.user?.id).filter((v) => Number.isFinite(v)));
+    } catch {}
+    const memberIds = await getChatPresenceUserIds(chatId);
+    if (!memberIds.length) {
+      return ctx.reply('ℹ️ <b>No stored member list for this chat.</b> Presence tracking via Supabase is required.', { parse_mode: 'HTML' });
+    }
+    const meId = ctx.me?.id;
+    const seen = Array.from(new Set(memberIds.filter((id) => Number.isFinite(id))));
+    const targets = [];
+    let skippedAdmins = 0;
+    let skippedBot = 0;
+    for (const id of seen) {
+      if (id === meId) {
+        skippedBot += 1;
+        continue;
+      }
+      if (adminIds.has(id)) {
+        skippedAdmins += 1;
+        continue;
+      }
+      targets.push(id);
+    }
+    if (!targets.length) {
+      return ctx.reply('ℹ️ <b>Nothing to remove.</b> Only admins or the bot are recorded for that chat.', { parse_mode: 'HTML' });
+    }
+    const header = [
+      `🚨 <b>Purging members from:</b> <code>${esc(chat?.title || String(chatId))}</code>`,
+      `<b>Seen members:</b> ${seen.length}`,
+      `<b>Attempting removals:</b> ${targets.length}`,
+      adminIds.size ? `🛡️ <b>Admins recorded:</b> ${adminIds.size}` : null,
+    ].filter(Boolean).join('\n');
+    await ctx.reply(header, { parse_mode: 'HTML' });
+    const parseDelay = (value, fallback) => {
+      const n = Number(value);
+      const base = Number.isFinite(n) ? n : fallback;
+      return Math.max(0, base || 0);
+    };
+    const minDelayMs = parseDelay(process.env.GROUP_KICK_DELAY_MIN_MS, 200);
+    const maxDelayMs = Math.max(minDelayMs, parseDelay(process.env.GROUP_KICK_DELAY_MAX_MS, 2000));
+    const nextDelayMs = () => {
+      if (maxDelayMs <= minDelayMs) return minDelayMs;
+      return minDelayMs + Math.random() * (maxDelayMs - minDelayMs);
+    };
+    const kicked = [];
+    const failures = [];
+    let alreadyGone = 0;
+    for (const userId of targets) {
+      try {
+        await ctx.api.banChatMember(chatId, userId, { until_date: Math.floor(Date.now() / 1000) + 60 });
+        kicked.push(userId);
+        try {
+          await ctx.api.unbanChatMember(chatId, userId);
+        } catch {}
+      } catch (err) {
+        const desc = String(err?.description || err?.message || err || '');
+        if (/user not found/i.test(desc) || /member not found/i.test(desc) || /USER_ID_INVALID/i.test(desc)) {
+          alreadyGone += 1;
+        } else {
+          failures.push({ userId, reason: desc.slice(0, 160) });
+        }
+      }
+      const delayMs = Math.floor(nextDelayMs());
+      if (delayMs > 0) {
+        await new Promise((resolve) => setTimeout(resolve, delayMs));
+      }
+    }
+    const summaryParts = [
+      `✅ <b>Removed:</b> ${kicked.length}`,
+      skippedAdmins ? `🛡️ <b>Skipped admins:</b> ${skippedAdmins}` : null,
+      skippedBot ? `🤖 <b>Skipped bot ID:</b> ${skippedBot}` : null,
+      alreadyGone ? `🚪 <b>Already absent:</b> ${alreadyGone}` : null,
+      failures.length ? `⚠️ <b>Failures:</b> ${failures.length}` : null,
+    ].filter(Boolean).join('\n');
+    const failureLines = failures.slice(0, 5).map((f) => `• <code>${f.userId}</code> — ${esc(f.reason)}`);
+    const body = failureLines.length
+      ? [summaryParts, '', '<b>Failure samples</b>', ...failureLines].join('\n')
+      : summaryParts;
+    await ctx.reply(body, { parse_mode: 'HTML' });
+    try {
+      await logAction(ctx, {
+        action: 'group_kick_all',
+        action_type: 'admin',
+        violation: '-',
+        chat: { id: chatId, title: chat?.title, username: chat?.username },
+        content: `removed=${kicked.length}; skipped_admins=${skippedAdmins}; skipped_bot=${skippedBot}; already_gone=${alreadyGone}; failures=${failures.length}`,
+      });
+    } catch {}
+  });
   composer.callbackQuery(/^ugroups:(\d+):(\d+):(\d+)$/i, async (ctx) => {
     if (!(await isBotAdminOrOwner(ctx))) return ctx.answerCallbackQuery();
     const [, uid, off, lim] = ctx.match;

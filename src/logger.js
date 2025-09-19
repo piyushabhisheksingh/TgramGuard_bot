@@ -799,3 +799,38 @@ export async function getUserGroupLinks(ctxOrApi, userId, { limit = 20, offset =
     return [];
   }
 }
+
+
+export async function getChatPresenceUserIds(chatId, { batchSize = 500 } = {}) {
+  const sb = getSupabase();
+  if (!sb) return [];
+  const cid = String(chatId);
+  const chunk = Math.max(1, Math.min(Number(batchSize) || 500, 1000));
+  const seen = new Set();
+  let offset = 0;
+  const out = [];
+  try {
+    while (true) {
+      const { data, error } = await sb
+        .from('user_chat_presence')
+        .select('user_id')
+        .eq('chat_id', cid)
+        .range(offset, offset + chunk - 1);
+      if (error) break;
+      const rows = data || [];
+      if (!rows.length) break;
+      for (const row of rows) {
+        const v = Number(row?.user_id ?? row?.userId);
+        if (!Number.isFinite(v)) continue;
+        if (seen.has(v)) continue;
+        seen.add(v);
+        out.push(v);
+      }
+      if (rows.length < chunk) break;
+      offset += chunk;
+    }
+  } catch {
+    return out;
+  }
+  return out;
+}
