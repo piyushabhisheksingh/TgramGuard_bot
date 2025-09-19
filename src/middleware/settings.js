@@ -704,7 +704,7 @@ export function settingsMiddleware() {
       return Math.max(0, base || 0);
     };
     const minDelayMs = parseDelay(process.env.GROUP_KICK_DELAY_MIN_MS, 200);
-    const maxDelayMs = Math.max(minDelayMs, parseDelay(process.env.GROUP_KICK_DELAY_MAX_MS, 2000));
+    const maxDelayMs = Math.max(minDelayMs, parseDelay(process.env.GROUP_KICK_DELAY_MAX_MS, 800));
     const nextDelayMs = () => {
       if (maxDelayMs <= minDelayMs) return minDelayMs;
       return minDelayMs + Math.random() * (maxDelayMs - minDelayMs);
