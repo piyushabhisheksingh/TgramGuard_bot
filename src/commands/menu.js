@@ -41,6 +41,9 @@ export const ownerPrivateCommands = [
   { command: 'user_stats_global', description: 'Show global user stats' },
   { command: 'user_groups', description: 'Show user group presence' },
   { command: 'group_kick_all', description: 'DM: kick all members from a group' },
+  { command: 'blacklist_add', description: 'Add user to global blacklist' },
+  { command: 'blacklist_remove', description: 'Remove user from global blacklist' },
+  { command: 'blacklist_list', description: 'List global blacklist entries' },
   { command: 'set_mycommands', description: 'Publish command menus' },
   { command: 'remove_mycommands', description: 'Clear command menus' },
 ];

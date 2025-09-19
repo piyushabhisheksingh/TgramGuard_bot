@@ -1,5 +1,5 @@
 import { Composer } from 'grammy';
-import { logAction, getBotStats, getGroupStats, getUserGroupCount, getUserGroupLinks, getChatPresenceUserIds, removeChatPresenceUsers } from '../logger.js';
+import { logAction, getBotStats, getGroupStats, getUserGroupCount, getUserGroupLinks, getChatPresenceUserIds, removeChatPresenceUsers, getUserPresenceChatIds } from '../logger.js';
 import { RULE_KEYS, DEFAULT_RULES, DEFAULT_LIMITS } from '../rules.js';
 import {
   addBotAdmin,
@@ -16,6 +16,10 @@ import {
   getChatWhitelist,
   getChatRules,
   getChatMaxLen,
+  setGlobalBlacklistEntry,
+  removeGlobalBlacklistEntry,
+  listGlobalBlacklist,
+  getBlacklistEntry,
 } from '../store/settings.js';
 import { consumeReview } from '../logger.js';
 import { addSafeTerms, addExplicitTerms } from '../filters/customTerms.js';
@@ -103,6 +107,67 @@ export function settingsMiddleware() {
       setTimeout(() => { ctx.api.deleteMessage(chatId, mid).catch(() => {}); }, Math.max(1, Math.trunc(seconds)) * 1000);
     }
     return sent;
+  }
+
+  const BLACKLIST_MUTE_PERMS = {
+    can_send_messages: false,
+    can_send_audios: false,
+    can_send_documents: false,
+    can_send_photos: false,
+    can_send_videos: false,
+    can_send_video_notes: false,
+    can_send_voice_notes: false,
+    can_send_polls: false,
+    can_send_other_messages: false,
+    can_add_web_page_previews: false,
+    can_change_info: false,
+    can_invite_users: false,
+    can_pin_messages: false,
+  };
+
+  const BL_DELAY_MIN = Math.max(0, Number(process.env.BLACKLIST_ENFORCE_DELAY_MIN_MS || 200));
+  const BL_DELAY_MAX_RAW = Number(process.env.BLACKLIST_ENFORCE_DELAY_MAX_MS || 1200);
+  const BL_DELAY_MAX = Number.isFinite(BL_DELAY_MAX_RAW) && BL_DELAY_MAX_RAW >= BL_DELAY_MIN ? BL_DELAY_MAX_RAW : BL_DELAY_MIN;
+  const nextBlacklistDelay = () => {
+    if (BL_DELAY_MAX <= BL_DELAY_MIN) return BL_DELAY_MIN;
+    return BL_DELAY_MIN + Math.random() * (BL_DELAY_MAX - BL_DELAY_MIN);
+  };
+
+  async function enforceBlacklistAcrossChats(ctx, userId, action) {
+    const chatIds = await getUserPresenceChatIds(userId);
+    const details = {
+      total: chatIds.length,
+      applied: [],
+      failures: [],
+    };
+    if (!chatIds.length) return details;
+    for (const chatId of chatIds) {
+      let chatMeta;
+      try {
+        chatMeta = await ctx.api.getChat(chatId);
+      } catch {}
+      try {
+        if (action === 'mute') {
+          await ctx.api.restrictChatMember(chatId, userId, { permissions: BLACKLIST_MUTE_PERMS });
+          details.applied.push({ chatId, title: chatMeta?.title, mode: 'mute' });
+        } else {
+          await ctx.api.banChatMember(chatId, userId, { until_date: Math.floor(Date.now() / 1000) + 60 });
+          try {
+            await ctx.api.unbanChatMember(chatId, userId);
+          } catch {}
+          try {
+            await removeChatPresenceUsers(chatId, [userId]);
+          } catch {}
+          details.applied.push({ chatId, title: chatMeta?.title, mode: 'kick' });
+        }
+      } catch (err) {
+        const reason = String(err?.description || err?.message || err || '').slice(0, 200);
+        details.failures.push({ chatId, title: chatMeta?.title, reason });
+      }
+      const delayMs = Math.floor(nextBlacklistDelay());
+      if (delayMs > 0) await new Promise((resolve) => setTimeout(resolve, delayMs));
+    }
+    return details;
   }
 
   // -------- Bot/Group stats builders & keyboards --------
@@ -426,6 +491,9 @@ export function settingsMiddleware() {
       '  /user_stats [user_id] — show user stats (reply or pass id; defaults to you)',
       '  /top_violators [days] [global] — list top 10 violators',
       '  /rules_status — show global/chat/effective rule status',
+      '  /blacklist_add <user_id> [kick|mute] [reason] — add to global blacklist',
+      '  /blacklist_remove <user_id> — remove from global blacklist',
+      '  /blacklist_list — show global blacklist entries',
       '',
       `Rules: ${RULE_KEYS.join(', ')}`,
     ].join('\n');
@@ -697,6 +765,124 @@ export function settingsMiddleware() {
         content: `removed=${kicked.length}; skipped_admins=${skippedAdmins}; skipped_bot=${skippedBot}; already_gone=${alreadyGone}; failures=${failures.length}; presence_removed=${presenceRemoved}; presence_error=${presenceError ? String(presenceError?.message || presenceError).slice(0, 120) : 'none'}`,
       });
     } catch {}
+  });
+
+  composer.command('blacklist_add', async (ctx) => {
+    if (!(await isBotAdminOrOwner(ctx))) return ctx.reply('⛔ <b>Admins only</b>', { parse_mode: 'HTML' });
+    const replyFrom = ctx.message?.reply_to_message?.from;
+    const raw = ctx.message?.text?.replace(/^\/blacklist_add(?:@\w+)?\s*/i, '') || '';
+    const parts = raw.split(/\s+/).filter(Boolean);
+    let targetId = replyFrom?.id;
+    let action = 'kick';
+    const reasonParts = [];
+    for (const tok of parts) {
+      const lower = tok.toLowerCase();
+      const num = Number(tok);
+      if (!Number.isFinite(targetId) && Number.isFinite(num)) {
+        targetId = num;
+        continue;
+      }
+      if (lower === 'kick' || lower === 'mute') {
+        action = lower;
+        continue;
+      }
+      reasonParts.push(tok);
+    }
+    if (!Number.isFinite(targetId)) {
+      return ctx.reply('⚠️ <b>Usage:</b> <code>/blacklist_add &lt;user_id&gt; [kick|mute] [reason]</code> (or reply to a user).', { parse_mode: 'HTML' });
+    }
+    const reason = reasonParts.join(' ').trim();
+    const entry = await setGlobalBlacklistEntry(targetId, {
+      action,
+      reason,
+      addedBy: ctx.from?.id,
+      addedAt: new Date().toISOString(),
+    });
+    const enforcement = await enforceBlacklistAcrossChats(ctx, targetId, entry.action);
+    const lines = [
+      `✅ <b>Added user</b> <code>${targetId}</code> to global blacklist.`,
+      `• Action: <code>${esc(entry.action)}</code>`,
+      reason ? `• Reason: <i>${esc(reason)}</i>` : null,
+      enforcement.total ? `• Groups evaluated: <b>${enforcement.total}</b>` : '• No presence data; enforcement will trigger on next activity.',
+      enforcement.applied.length ? `• Applied in: <b>${enforcement.applied.length}</b> group(s)` : null,
+      enforcement.failures.length ? `• Failures: <b>${enforcement.failures.length}</b>` : null,
+    ].filter(Boolean);
+    if (enforcement.applied.length) {
+      const sample = enforcement.applied.slice(0, 5).map((row) => `  ◦ ${esc(row.title || String(row.chatId))} (${row.mode})`);
+      lines.push('<b>Applied samples</b>');
+      lines.push(...sample);
+      if (enforcement.applied.length > sample.length) lines.push(`  … ${enforcement.applied.length - sample.length} more`);
+    }
+    if (enforcement.failures.length) {
+      const sampleFail = enforcement.failures.slice(0, 5).map((row) => `  ◦ ${esc(row.title || String(row.chatId))}: <code>${esc(row.reason)}</code>`);
+      lines.push('<b>Failures</b>');
+      lines.push(...sampleFail);
+      if (enforcement.failures.length > sampleFail.length) lines.push(`  … ${enforcement.failures.length - sampleFail.length} more`);
+    }
+    await ctx.reply(lines.join('\n'), { parse_mode: 'HTML', disable_web_page_preview: true });
+    try {
+      await logAction(ctx, {
+        action: 'global_blacklist_add',
+        action_type: 'admin',
+        violation: 'blacklist',
+        user: { id: targetId },
+        chat: ctx.chat,
+        content: `action=${entry.action}; reason=${reason || '-'}; groups_total=${enforcement.total}; applied=${enforcement.applied.length}; failures=${enforcement.failures.length}`,
+      });
+    } catch {}
+  });
+
+  composer.command('blacklist_remove', async (ctx) => {
+    if (!(await isBotAdminOrOwner(ctx))) return ctx.reply('⛔ <b>Admins only</b>', { parse_mode: 'HTML' });
+    const replyFrom = ctx.message?.reply_to_message?.from;
+    const raw = ctx.message?.text?.replace(/^\/blacklist_remove(?:@\w+)?\s*/i, '') || '';
+    const parts = raw.split(/\s+/).filter(Boolean);
+    let targetId = replyFrom?.id;
+    for (const tok of parts) {
+      const num = Number(tok);
+      if (!Number.isFinite(targetId) && Number.isFinite(num)) {
+        targetId = num;
+      }
+    }
+    if (!Number.isFinite(targetId)) {
+      return ctx.reply('⚠️ <b>Usage:</b> <code>/blacklist_remove &lt;user_id&gt;</code> (or reply to a user).', { parse_mode: 'HTML' });
+    }
+    const existed = await getBlacklistEntry(targetId);
+    const removed = await removeGlobalBlacklistEntry(targetId);
+    if (!removed) {
+      return ctx.reply(`ℹ️ <b>User</b> <code>${targetId}</code> is not on the global blacklist.`, { parse_mode: 'HTML' });
+    }
+    await ctx.reply(`✅ <b>Removed</b> <code>${targetId}</code> from the global blacklist.`, { parse_mode: 'HTML' });
+    try {
+      await logAction(ctx, {
+        action: 'global_blacklist_remove',
+        action_type: 'admin',
+        violation: 'blacklist',
+        user: { id: targetId },
+        chat: ctx.chat,
+        content: `previous_action=${existed?.action || '-'}; had_entry=${existed ? 'yes' : 'no'}`,
+      });
+    } catch {}
+  });
+
+  composer.command('blacklist_list', async (ctx) => {
+    if (!(await isBotAdminOrOwner(ctx))) return ctx.reply('⛔ <b>Admins only</b>', { parse_mode: 'HTML' });
+    const entries = await listGlobalBlacklist();
+    if (!entries.length) {
+      return ctx.reply('ℹ️ <b>The global blacklist is empty.</b>', { parse_mode: 'HTML' });
+    }
+    const lines = entries
+      .sort((a, b) => (a.userId > b.userId ? 1 : -1))
+      .slice(0, 50)
+      .map((entry) => {
+        const ts = entry.addedAt ? new Date(entry.addedAt).toISOString() : '-';
+        const reason = entry.reason ? ` — <i>${esc(entry.reason)}</i>` : '';
+        return `• <code>${entry.userId}</code> → <code>${esc(entry.action)}</code>${reason} (since ${esc(ts)})`;
+      });
+    if (entries.length > 50) {
+      lines.push(`… ${entries.length - 50} more not shown`);
+    }
+    return ctx.reply(['<b>Global blacklist entries</b>', ...lines].join('\n'), { parse_mode: 'HTML', disable_web_page_preview: true });
   });
   composer.callbackQuery(/^ugroups:(\d+):(\d+):(\d+)$/i, async (ctx) => {
     if (!(await isBotAdminOrOwner(ctx))) return ctx.answerCallbackQuery();

@@ -7,8 +7,8 @@ import http from 'node:http';
 import { securityMiddleware } from './middleware/security.js';
 import { settingsMiddleware } from './middleware/settings.js';
 import { healthMiddleware } from './middleware/health.js';
-import { bootstrapAdminsFromEnv, areCommandsInitialized, markCommandsInitialized } from './store/settings.js';
-import { logActionPinned, recordUserPresence } from './logger.js';
+import { bootstrapAdminsFromEnv, areCommandsInitialized, markCommandsInitialized, getBlacklistEntry } from './store/settings.js';
+import { logActionPinned, logAction, recordUserPresence, removeChatPresenceUsers } from './logger.js';
 import { defaultCommands, adminCommands, ownerPrivateCommands } from './commands/menu.js';
 import { startExplicitLearner } from './learning/explicit_learner.js';
 
@@ -20,6 +20,22 @@ if (!token) {
 }
 
 const bot = new Bot(token);
+
+const BLACKLIST_MUTE_PERMISSIONS = {
+  can_send_messages: false,
+  can_send_audios: false,
+  can_send_documents: false,
+  can_send_photos: false,
+  can_send_videos: false,
+  can_send_video_notes: false,
+  can_send_voice_notes: false,
+  can_send_polls: false,
+  can_send_other_messages: false,
+  can_add_web_page_previews: false,
+  can_change_info: false,
+  can_invite_users: false,
+  can_pin_messages: false,
+};
 
 // Reliability: auto-retry transient network errors and 429s with backoff
 bot.api.config.use(autoRetry());
@@ -84,8 +100,8 @@ bot.on('message:new_chat_members', async (ctx) => {
     const meId = ctx.me?.id;
     const members = ctx.msg?.new_chat_members || [];
     // Filter out bots and the bot itself
-    const humans = members.filter((m) => !m.is_bot && (!meId || m.id !== meId));
-    if (!humans.length) return;
+    const candidates = members.filter((m) => !m.is_bot && (!meId || m.id !== meId));
+    if (!candidates.length) return;
 
     function esc(s = '') {
       return String(s).replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
@@ -95,7 +111,58 @@ bot.on('message:new_chat_members', async (ctx) => {
       return `<a href="tg://user?id=${u.id}">${esc(name)}</a>`;
     }
 
-    const names = humans.map(mention).join(', ');
+    const allowed = [];
+    const blockedNotices = [];
+    for (const member of candidates) {
+      const entry = await getBlacklistEntry(member.id);
+      if (!entry) {
+        allowed.push(member);
+        continue;
+      }
+      const action = entry.action === 'mute' ? 'mute' : 'kick';
+      const reason = entry.reason ? entry.reason.slice(0, 180) : '';
+      const reasonHtml = reason ? ` Reason: <i>${esc(reason)}</i>` : '';
+      try {
+        if (action === 'mute') {
+          await ctx.api.restrictChatMember(ctx.chat.id, member.id, { permissions: BLACKLIST_MUTE_PERMISSIONS });
+        } else {
+          await ctx.api.banChatMember(ctx.chat.id, member.id, { until_date: Math.floor(Date.now() / 1000) + 60 });
+          try { await ctx.api.unbanChatMember(ctx.chat.id, member.id); } catch {}
+          try { await removeChatPresenceUsers(ctx.chat.id, [member.id]); } catch {}
+        }
+        blockedNotices.push(`• ${mention(member)} ${action === 'mute' ? 'muted' : 'removed'} by global blacklist.${reasonHtml}`);
+        await logAction(ctx, {
+          action: action === 'mute' ? 'global_blacklist_mute' : 'global_blacklist_kick',
+          action_type: 'security',
+          violation: 'blacklist',
+          user: member,
+          chat: ctx.chat,
+          content: `action=${action}; origin=join; reason=${reason || '-'}`,
+        });
+      } catch (err) {
+        const errMsg = String(err?.description || err?.message || err || '').slice(0, 160);
+        await logAction(ctx, {
+          action: 'global_blacklist_failed',
+          action_type: 'security',
+          violation: 'blacklist',
+          user: member,
+          chat: ctx.chat,
+          content: `action=${action}; origin=join; error=${errMsg}`,
+        });
+        allowed.push(member);
+      }
+    }
+
+    if (blockedNotices.length) {
+      const notice = ['🚫 <b>Global blacklist enforcement</b>', ...blockedNotices].join('\n');
+      try {
+        await ctx.api.sendMessage(ctx.chat.id, notice, { parse_mode: 'HTML', disable_web_page_preview: true });
+      } catch {}
+    }
+
+    if (!allowed.length) return;
+
+    const names = allowed.map(mention).join(', ');
     const title = esc(ctx.chat?.title || 'this group');
     const rules = [
       '• No links',

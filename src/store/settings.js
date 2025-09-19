@@ -28,6 +28,7 @@ async function ensureFile() {
       global_limits: { ...DEFAULT_LIMITS },
       chat_limits: {},
       chat_whitelist: {},
+      global_blacklist: {},
     };
     await fs.writeFile(FILE, JSON.stringify(initial, null, 2));
   }
@@ -140,6 +141,7 @@ function normalize(s) {
   out.global_limits = { ...DEFAULT_LIMITS, ...(out.global_limits || {}) };
   out.chat_limits ||= {};
   out.chat_whitelist ||= {};
+  out.global_blacklist ||= {};
   // Optional flags
   out.commands_initialized = Boolean(out.commands_initialized);
   return out;
@@ -357,4 +359,67 @@ export async function getChatMaxLen(chatId) {
   }
   const s = await load();
   return s.chat_limits[String(chatId)]?.max_len;
+}
+
+// -------- Global blacklist API --------
+
+function normalizeBlacklistEntry(entry = {}) {
+  const action = (String(entry.action || 'kick').toLowerCase() === 'mute') ? 'mute' : 'kick';
+  const reason = typeof entry.reason === 'string' ? entry.reason.slice(0, 200) : '';
+  const addedBy = Number.isFinite(entry.addedBy) ? entry.addedBy : Number.isFinite(entry.added_by) ? entry.added_by : undefined;
+  const addedAt = entry.addedAt || entry.added_at || new Date().toISOString();
+  return {
+    action,
+    reason,
+    addedBy,
+    addedAt,
+  };
+}
+
+export async function getGlobalBlacklistMap() {
+  const s = await load();
+  const out = {};
+  for (const [key, value] of Object.entries(s.global_blacklist || {})) {
+    out[key] = normalizeBlacklistEntry(value);
+  }
+  return out;
+}
+
+export async function getBlacklistEntry(userId) {
+  if (!Number.isFinite(userId) && typeof userId !== 'string') return null;
+  const key = String(userId);
+  const s = await load();
+  const entry = s.global_blacklist?.[key];
+  return entry ? normalizeBlacklistEntry(entry) : null;
+}
+
+export async function setGlobalBlacklistEntry(userId, entry) {
+  if (!Number.isFinite(userId) && typeof userId !== 'string') throw new Error('Invalid user id');
+  const key = String(userId);
+  const normalized = normalizeBlacklistEntry(entry);
+  const s = await load();
+  if (!s.global_blacklist) s.global_blacklist = {};
+  s.global_blacklist[key] = normalized;
+  await save(s);
+  return normalized;
+}
+
+export async function removeGlobalBlacklistEntry(userId) {
+  if (!Number.isFinite(userId) && typeof userId !== 'string') return false;
+  const key = String(userId);
+  const s = await load();
+  if (!s.global_blacklist || !s.global_blacklist[key]) return false;
+  delete s.global_blacklist[key];
+  await save(s);
+  return true;
+}
+
+export async function isUserBlacklisted(userId) {
+  const entry = await getBlacklistEntry(userId);
+  return Boolean(entry);
+}
+
+export async function listGlobalBlacklist() {
+  const map = await getGlobalBlacklistMap();
+  return Object.entries(map).map(([userId, meta]) => ({ userId, ...meta }));
 }

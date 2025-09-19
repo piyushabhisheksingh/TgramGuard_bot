@@ -4,8 +4,8 @@ import {
   containsExplicit,
   overCharLimit,
 } from '../filters.js';
-import { isRuleEnabled, getSettings, getEffectiveMaxLen, isUserWhitelisted } from '../store/settings.js';
-import { logAction, getUserRiskSummary, buildFunnyPrefix } from '../logger.js';
+import { isRuleEnabled, getSettings, getEffectiveMaxLen, isUserWhitelisted, getBlacklistEntry } from '../store/settings.js';
+import { logAction, getUserRiskSummary, buildFunnyPrefix, removeChatPresenceUsers } from '../logger.js';
 import { classifyText as aiClassifyText, classifyLinks as aiClassifyLinks } from '../ai/provider_openai.js';
 import { addSafeTerms } from '../filters/customTerms.js';
 
@@ -131,6 +131,22 @@ const EXTRA_SPICE = [
   'Next time better hoga, right? 👍',
 ];
 
+const BLACKLIST_MUTE_PERMISSIONS = {
+  can_send_messages: false,
+  can_send_audios: false,
+  can_send_documents: false,
+  can_send_photos: false,
+  can_send_videos: false,
+  can_send_video_notes: false,
+  can_send_voice_notes: false,
+  can_send_polls: false,
+  can_send_other_messages: false,
+  can_add_web_page_previews: false,
+  can_change_info: false,
+  can_invite_users: false,
+  can_pin_messages: false,
+};
+
 function spiceProbability() {
   const level = String(process.env.HUMOR_SPICE || 'spicy').toLowerCase();
   // mild -> 0.15 harsh chance, normal -> 0.35, spicy -> 0.75
@@ -231,6 +247,61 @@ async function notifyAndCleanup(ctx, text, seconds = 8) {
   }
 }
 
+async function enforceGlobalBlacklist(ctx) {
+  const userId = ctx.from?.id;
+  const chatId = ctx.chat?.id;
+  if (!Number.isFinite(userId) || !Number.isFinite(chatId)) return false;
+  if (await isBotPrivileged(userId)) return false;
+  const entry = await getBlacklistEntry(userId);
+  if (!entry) return false;
+  const action = entry.action === 'mute' ? 'mute' : 'kick';
+  const reason = entry.reason ? entry.reason.slice(0, 180) : '';
+  const reasonHtml = reason ? ` Reason: <i>${escapeHtml(reason)}</i>` : '';
+  const messageId = ctx.msg?.message_id;
+  if (messageId && (await ensureBotCanDelete(ctx))) {
+    try { await ctx.api.deleteMessage(chatId, messageId); } catch {}
+  }
+  let success = false;
+  try {
+    if (action === 'mute') {
+      await ctx.api.restrictChatMember(chatId, userId, { permissions: BLACKLIST_MUTE_PERMISSIONS });
+      success = true;
+    } else {
+      await ctx.api.banChatMember(chatId, userId, { until_date: Math.floor(Date.now() / 1000) + 60 });
+      success = true;
+      try { await ctx.api.unbanChatMember(chatId, userId); } catch {}
+      try { await removeChatPresenceUsers(chatId, [userId]); } catch {}
+    }
+  } catch (err) {
+    const errMsg = String(err?.description || err?.message || err || '').slice(0, 160);
+    await logAction(ctx, {
+      action: 'global_blacklist_failed',
+      action_type: 'security',
+      violation: 'blacklist',
+      user: ctx.from,
+      chat: ctx.chat,
+      content: `action=${action}; error=${errMsg}`,
+    });
+    return false;
+  }
+  if (success) {
+    await notifyAndCleanup(
+      ctx,
+      `🚫 ${await mentionPlainWithPrefix(ctx, ctx.from, 'blacklist')} <b>${action === 'mute' ? 'muted by global blacklist' : 'removed by global blacklist'}</b>.${reasonHtml}`,
+      10
+    );
+    await logAction(ctx, {
+      action: action === 'mute' ? 'global_blacklist_mute' : 'global_blacklist_kick',
+      action_type: 'security',
+      violation: 'blacklist',
+      user: ctx.from,
+      chat: ctx.chat,
+      content: `action=${action}; reason=${reason || '-'}; enforced=1`,
+    });
+  }
+  return true;
+}
+
 async function getBotPermissions(ctx) {
   const chatId = ctx.chat?.id;
   if (!chatId) return { isAdmin: false, canDelete: false };
@@ -290,6 +361,8 @@ export function securityMiddleware() {
   return async (ctx, next) => {
     const type = ctx.chat?.type;
     if (!(type === 'group' || type === 'supergroup')) return next();
+
+    if (await enforceGlobalBlacklist(ctx)) return;
 
     // Exemption: group admins/owner and bot owner/admins
     if (await isExempt(ctx)) return next();
