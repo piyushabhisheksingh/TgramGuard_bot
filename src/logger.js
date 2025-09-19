@@ -834,3 +834,34 @@ export async function getChatPresenceUserIds(chatId, { batchSize = 500 } = {}) {
   }
   return out;
 }
+
+// Remove presence entries for users no longer in a chat (best-effort cleanup)
+export async function removeChatPresenceUsers(chatId, userIds = []) {
+  const sb = getSupabase();
+  if (!sb) return { removed: 0 };
+  const cid = String(chatId);
+  const ids = Array.from(new Set((userIds || []).map((id) => {
+    if (typeof id === 'string' && id.trim()) return id.trim();
+    if (Number.isFinite(id)) return String(id);
+    const n = Number(id);
+    return Number.isFinite(n) ? String(n) : '';
+  }).filter(Boolean)));
+  if (!ids.length) return { removed: 0 };
+  let removed = 0;
+  for (let i = 0; i < ids.length; i += 100) {
+    const chunk = ids.slice(i, i + 100);
+    try {
+      const { data, error } = await sb
+        .from('user_chat_presence')
+        .delete()
+        .eq('chat_id', cid)
+        .in('user_id', chunk)
+        .select('user_id');
+      if (error) return { removed, error };
+      removed += Array.isArray(data) ? data.length : 0;
+    } catch (error) {
+      return { removed, error };
+    }
+  }
+  return { removed };
+}

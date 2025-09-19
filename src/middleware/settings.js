@@ -1,5 +1,5 @@
 import { Composer } from 'grammy';
-import { logAction, getBotStats, getGroupStats, getUserGroupCount, getUserGroupLinks, getChatPresenceUserIds } from '../logger.js';
+import { logAction, getBotStats, getGroupStats, getUserGroupCount, getUserGroupLinks, getChatPresenceUserIds, removeChatPresenceUsers } from '../logger.js';
 import { RULE_KEYS, DEFAULT_RULES, DEFAULT_LIMITS } from '../rules.js';
 import {
   addBotAdmin,
@@ -622,6 +622,7 @@ export function settingsMiddleware() {
     const kicked = [];
     const failures = [];
     let alreadyGone = 0;
+    const alreadyGoneIds = [];
     for (const userId of targets) {
       try {
         await ctx.api.banChatMember(chatId, userId, { until_date: Math.floor(Date.now() / 1000) + 60 });
@@ -633,6 +634,7 @@ export function settingsMiddleware() {
         const desc = String(err?.description || err?.message || err || '');
         if (/user not found/i.test(desc) || /member not found/i.test(desc) || /USER_ID_INVALID/i.test(desc)) {
           alreadyGone += 1;
+          alreadyGoneIds.push(userId);
         } else {
           failures.push({ userId, reason: desc.slice(0, 160) });
         }
@@ -640,6 +642,18 @@ export function settingsMiddleware() {
       const delayMs = Math.floor(nextDelayMs());
       if (delayMs > 0) {
         await new Promise((resolve) => setTimeout(resolve, delayMs));
+      }
+    }
+    const pruneIds = Array.from(new Set([...kicked, ...alreadyGoneIds]));
+    let presenceRemoved = 0;
+    let presenceError;
+    if (pruneIds.length) {
+      try {
+        const res = await removeChatPresenceUsers(chatId, pruneIds);
+        presenceRemoved = Number(res?.removed || 0);
+        if (res?.error) presenceError = res.error;
+      } catch (err) {
+        presenceError = err;
       }
     }
     const summaryParts = [
@@ -650,17 +664,37 @@ export function settingsMiddleware() {
       failures.length ? `⚠️ <b>Failures:</b> ${failures.length}` : null,
     ].filter(Boolean).join('\n');
     const failureLines = failures.slice(0, 5).map((f) => `• <code>${f.userId}</code> — ${esc(f.reason)}`);
-    const body = failureLines.length
-      ? [summaryParts, '', '<b>Failure samples</b>', ...failureLines].join('\n')
-      : summaryParts;
+    const extraLines = [];
+    if (pruneIds.length) {
+      extraLines.push(`🗃️ <b>Presence records pruned:</b> ${presenceRemoved}`);
+      if (presenceError) {
+        const msg = String(presenceError?.message || presenceError || '').slice(0, 160);
+        extraLines.push(`⚠️ <b>Presence cleanup error:</b> <code>${esc(msg)}</code>`);
+      }
+    }
+    const body = (() => {
+      const main = extraLines.length ? [summaryParts, ...extraLines].join('\n') : summaryParts;
+      if (!failureLines.length) return main;
+      return [main, '', '<b>Failure samples</b>', ...failureLines].join('\n');
+    })();
     await ctx.reply(body, { parse_mode: 'HTML' });
+    const noticeParts = [
+      '⚠️ Cleanup complete.',
+      kicked.length ? `Removed ${kicked.length} member${kicked.length === 1 ? '' : 's'}.` : null,
+      alreadyGone ? `${alreadyGone} already absent.` : null,
+    ].filter(Boolean).join(' ');
+    if (noticeParts) {
+      try {
+        await ctx.api.sendMessage(chatId, noticeParts, { disable_web_page_preview: true });
+      } catch {}
+    }
     try {
       await logAction(ctx, {
         action: 'group_kick_all',
         action_type: 'admin',
         violation: '-',
         chat: { id: chatId, title: chat?.title, username: chat?.username },
-        content: `removed=${kicked.length}; skipped_admins=${skippedAdmins}; skipped_bot=${skippedBot}; already_gone=${alreadyGone}; failures=${failures.length}`,
+        content: `removed=${kicked.length}; skipped_admins=${skippedAdmins}; skipped_bot=${skippedBot}; already_gone=${alreadyGone}; failures=${failures.length}; presence_removed=${presenceRemoved}; presence_error=${presenceError ? String(presenceError?.message || presenceError).slice(0, 120) : 'none'}`,
       });
     } catch {}
   });
