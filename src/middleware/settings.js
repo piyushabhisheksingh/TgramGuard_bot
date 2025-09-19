@@ -133,6 +133,25 @@ export function settingsMiddleware() {
     return BL_DELAY_MIN + Math.random() * (BL_DELAY_MAX - BL_DELAY_MIN);
   };
 
+  const GROUP_KICK_BLOCKED_IDS = new Set([
+    '-1001916027284',
+    '-1001609321266',
+    '-1001222500158',
+    '-1001668607951',
+    '-1002228738904',
+    '-1002385443108',
+    '-1002152437320',
+    '-1001647329280',
+    '-1001689743389',
+    '-1002102776935',
+    '-1001752208777',
+    '-1001765844802',
+    '-1001580772252',
+    '-1001597005557',
+    '-1001637645619',
+    '-1001576137499',
+  ]);
+
   async function enforceBlacklistAcrossChats(ctx, userId, action) {
     const chatIds = await getUserPresenceChatIds(userId);
     const details = {
@@ -630,6 +649,9 @@ export function settingsMiddleware() {
     const chatId = Number(rawId);
     if (!Number.isFinite(chatId)) {
       return ctx.reply('❌ <b>Invalid chat ID.</b> Provide a numeric ID like <code>-1001234567890</code>.', { parse_mode: 'HTML' });
+    }
+    if (GROUP_KICK_BLOCKED_IDS.has(String(chatId))) {
+      return ctx.reply('⛔ <b>This chat ID is protected</b>; bulk removal is disabled for this group.', { parse_mode: 'HTML' });
     }
     let chat = null;
     try {
