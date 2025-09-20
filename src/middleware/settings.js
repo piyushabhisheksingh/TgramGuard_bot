@@ -775,7 +775,7 @@ export function settingsMiddleware() {
     ].filter(Boolean).join(' ');
     if (noticeParts) {
       try {
-        await ctx.api.sendMessage(chatId, noticeParts, { disable_web_page_preview: true });
+        // await ctx.api.sendMessage(chatId, noticeParts, { disable_web_page_preview: true });
       } catch {}
     }
     try {
