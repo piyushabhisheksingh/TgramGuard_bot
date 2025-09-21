@@ -61,6 +61,22 @@ function todayKey(d = new Date()) {
   return `${y}-${m}-${dd}`;
 }
 
+function calcAverage(arr = []) {
+  if (!Array.isArray(arr) || arr.length === 0) return 0;
+  return arr.reduce((sum, v) => sum + Number(v || 0), 0) / arr.length;
+}
+
+function calcStd(arr = []) {
+  if (!Array.isArray(arr) || arr.length === 0) return 0;
+  const avg = calcAverage(arr);
+  if (!Number.isFinite(avg)) return 0;
+  const variance = arr.reduce((sum, v) => {
+    const diff = Number(v || 0) - avg;
+    return sum + diff * diff;
+  }, 0) / arr.length;
+  return Math.sqrt(Math.max(0, variance));
+}
+
 function ensureProfile(s, userId) {
   const key = String(userId);
   let p = s.user_profiles[key];
@@ -289,12 +305,40 @@ export async function getUserSummary(userId) {
     return todayKey(d);
   };
   let w7 = 0, w30 = 0, streak = 0;
+  let active7 = 0, active30 = 0;
+  let longestBreak = 0, currentBreak = 0;
+  const last7Counts = [];
+  const last30Counts = [];
+  let weekdayTotal = 0;
+  let weekendTotal = 0;
+  let weekendActiveDays = 0;
+  let weekdayActiveDays = 0;
   for (let i = 0; i < 30; i++) {
     const key = daysBack(i);
     const c = p.daily_counts[key] || 0;
     if (i < 7) w7 += c;
     w30 += c;
     if (c > 0 && streak === i) streak += 1; // consecutive from today backwards
+    if (c > 0) {
+      if (i < 7) active7 += 1;
+      active30 += 1;
+      currentBreak = 0;
+    } else {
+      currentBreak += 1;
+      if (currentBreak > longestBreak) longestBreak = currentBreak;
+    }
+    if (i < 7) last7Counts.push(c);
+    last30Counts.push(c);
+    const d = new Date(now);
+    d.setUTCDate(d.getUTCDate() - i);
+    const dow = d.getUTCDay(); // 0=Sun ... 6=Sat
+    if (dow === 0 || dow === 6) {
+      weekendTotal += c;
+      if (c > 0) weekendActiveDays += 1;
+    } else {
+      weekdayTotal += c;
+      if (c > 0) weekdayActiveDays += 1;
+    }
   }
   // Top active hours
   const hours = p.activity_by_hour.map((v, h) => ({ h, v })).sort((a, b) => (b.v - a.v));
@@ -303,6 +347,21 @@ export async function getUserSummary(userId) {
   const sessionsByHour = (p.sessions_by_hour || []).slice();
   const totalSessions = sessionsByHour.reduce((a, b) => a + (b || 0), 0);
   const lateSessions = sessionsByHour.reduce((acc, v, h) => acc + ((h <= 5 || h >= 22) ? (v || 0) : 0), 0);
+  const dayStats7 = {
+    average: Number(calcAverage(last7Counts).toFixed(2)),
+    std: Number(calcStd(last7Counts).toFixed(2)),
+    max: Math.max(0, ...last7Counts),
+    min: last7Counts.length ? Math.min(...last7Counts) : 0,
+    zeros: last7Counts.filter((v) => (v || 0) === 0).length,
+  };
+  const dayStats30 = {
+    average: Number(calcAverage(last30Counts).toFixed(2)),
+    std: Number(calcStd(last30Counts).toFixed(2)),
+    max: Math.max(0, ...last30Counts),
+    min: last30Counts.length ? Math.min(...last30Counts) : 0,
+    zeros: last30Counts.filter((v) => (v || 0) === 0).length,
+  };
+  const weekendRatio = w30 > 0 ? Number((weekendTotal / w30).toFixed(3)) : 0;
   return {
     last_seen: p.last_seen,
     last_active_ts: p.last_active_ts,
@@ -310,13 +369,41 @@ export async function getUserSummary(userId) {
     week_count: w7,
     month_count: w30,
     streak_days: streak,
+    active_days: { last7: active7, last30: active30 },
+    longest_break_days: longestBreak,
     top_hours: topHours,
     avg_message_len: avgLen,
     activity_by_hour: p.activity_by_hour.slice(),
     sessions: { total: totalSessions, by_hour: sessionsByHour, late_total: lateSessions },
+    daily: {
+      last7: dayStats7,
+      last30: dayStats30,
+      weekend_ratio: weekendRatio,
+      weekend_activity: weekendTotal,
+      weekday_activity: weekdayTotal,
+      weekend_active_days: weekendActiveDays,
+      weekday_active_days: weekdayActiveDays,
+    },
     profile: p.profile,
     comms: { ...p.comms },
   };
+}
+
+export async function getAllUserSummaries({ includeOptOut = false, limit = null } = {}) {
+  const s = await load();
+  const ids = Object.keys(s.user_profiles || {});
+  const out = [];
+  const max = Number.isFinite(limit) && limit > 0 ? Number(limit) : null;
+  for (const id of ids) {
+    if (!includeOptOut && s.opt_out.includes(id)) continue;
+    const uid = Number(id);
+    if (!Number.isFinite(uid)) continue;
+    const summary = await getUserSummary(uid);
+    if (!summary) continue;
+    out.push({ userId: uid, summary });
+    if (max != null && out.length >= max) break;
+  }
+  return out;
 }
 
 export async function applyAIMetrics(userId, { toxicity = 0, sexual = 0 } = {}) {

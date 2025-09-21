@@ -10,7 +10,8 @@
     "dev": "nodemon",
     "safelist:format": "node scripts/format_safelist.mjs",
     "test:filters": "node scripts/check_filters.mjs",
-    "check:imports": "node scripts/check_imports.mjs"
+    "check:imports": "node scripts/check_imports.mjs",
+    "health:export": "node scripts/export_health_metrics.mjs"
   },
   "engines": {
     "node": ">=20"

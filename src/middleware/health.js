@@ -10,6 +10,22 @@ function esc(s = '') {
   return String(s).replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
 }
 
+function avg(arr = []) {
+  if (!Array.isArray(arr) || arr.length === 0) return 0;
+  return arr.reduce((sum, v) => sum + Number(v || 0), 0) / arr.length;
+}
+
+function std(arr = []) {
+  if (!Array.isArray(arr) || arr.length === 0) return 0;
+  const mean = avg(arr);
+  if (!Number.isFinite(mean)) return 0;
+  const variance = arr.reduce((acc, v) => {
+    const diff = Number(v || 0) - mean;
+    return acc + diff * diff;
+  }, 0) / arr.length;
+  return Math.sqrt(Math.max(0, variance));
+}
+
 function mentionHTML(user) {
   const id = user?.id;
   const name = [user?.first_name, user?.last_name].filter(Boolean).join(' ') || 'user';
@@ -82,42 +98,96 @@ function buildPersonalitySuggestions(profile) {
 // Build targeted suggestions based on health/discipline scores and style traits
 function buildScoreBasedTips(summary, health, discipline, catH, catD, styleTraits = []) {
   const tips = [];
+  const seen = new Set();
+  const add = (tip) => {
+    if (!tip) return;
+    const text = tip.trim();
+    if (!text) return;
+    if (seen.has(text)) return;
+    seen.add(text);
+    tips.push(text);
+  };
+
   // Health-oriented suggestions by category
   if (health.score < 40) {
-    tips.push('Fix sleep rhythm: keep a consistent sleep/wake time and avoid screens 60–90 minutes before bed.');
-    tips.push('Try 5–10 minutes of pranayama and a short meditation in the evening to unwind.');
-    tips.push('Set quiet hours for chats and keep late-night sessions minimal.');
+    add('Reset sleep rhythm: fix a wind-down by 10:30 PM and keep screens away 60–90 minutes before bed.');
+    add('Use pranayama and 5 minutes of meditation before sleep to calm the nervous system.');
+    add('Create quiet chat hours after 11 PM so your mind can recover.');
   } else if (health.score < 55) {
-    tips.push('Stabilize your day: regular sleep window, micro‑breaks hourly, and steady hydration.');
-    tips.push('Evening wind‑down: light stretching or a few Surya Namaskars, then deep breathing.');
+    add('Stabilise your day with a consistent wake time, micro‑breaks each hour, and steady hydration.');
+    add('Add light stretching or Surya Namaskars in the evening to release tension.');
   } else if (health.score < 70) {
-    tips.push('You are close to balanced—add short movement breaks and a simple morning routine.');
-    tips.push('Use batch notifications to reduce frequent checking.');
+    add('You are close to balanced—add short movement breaks and batch notifications to avoid constant context switching.');
   } else if (health.score < 85) {
-    tips.push('Nice balance—maintain your routine and schedule one weekly device‑free block.');
+    add('Nice balance—lock one weekly device‑free block to keep recovery strong.');
   } else {
-    tips.push('Excellent balance—keep your sattvic routine and mindful breaks.');
+    add('Excellent balance—maintain your sattvic routine and mindful breaks.');
   }
+
   // Discipline-oriented suggestions by category
   if (discipline.score < 55) {
-    tips.push('Keep tone calm and clear; reduce all‑caps and extra exclamation marks.');
-    tips.push('Avoid frequent link dropping; focus on concise, helpful messages.');
-    tips.push('Practice ahimsa (non‑harm) and satya (truthful clarity) in speech.');
+    add('Calm your tone: drop all‑caps, reduce exclamation bursts, and keep sentences clear.');
+    add('Cut back on link drops—share context first, then a single resource.');
+    add('Practice ahimsa and satya: pause, breathe, then respond with respectful words.');
   } else if (discipline.score < 70) {
-    tips.push('Polish your tone: fewer exclamations, more concise points.');
+    add('Polish your tone with shorter messages and fewer exclamation points.');
   } else if (discipline.score >= 85) {
-    tips.push('Great communication discipline—keep it up.');
+    add('Great communication discipline—keep it steady.');
   }
-  // Style‑specific nudges
+
+  const factors = health?.factors || {};
+
+  const sleepMeta = factors.sleepBalance || {};
+  if ((sleepMeta.lateRatio ?? 0) >= 0.3) add('Set a digital sunset—mute chats after 10:30 PM and leave devices outside the bedroom.');
+  else if ((sleepMeta.lateRatio ?? 0) > 0 && (sleepMeta.lateRatio ?? 0) <= 0.08 && health.score >= 60) add('Keep protecting your sleep window; it is keeping your energy high.');
+
+  const restMeta = factors.restBalance || {};
+  if ((restMeta.restDays7 ?? 0) <= 1 && (restMeta.activeDays7 ?? 0) >= 5) add('Block one full offline day this week—treat it as recovery sadhana.');
+  if ((restMeta.activeDays30 ?? 0) >= 24) add('Plan intentional pauses every few days; even half-day retreats help your mind reset.');
+  if ((restMeta.restDays7 ?? 0) >= 3 && health.score >= 55) add('Great rest cadence—use one rest day for a walk, sunlight, or gentle yoga.');
+
+  const loadMeta = factors.activityLoad || {};
+  if ((loadMeta.weekCount || 0) > 650) add('Schedule deep-focus slots with chats closed and delegate routine updates to avoid overload.');
+  else if ((loadMeta.weekCount || 0) > 0 && (loadMeta.weekCount || 0) < 80) add('Engage intentionally 2–3 times a week so conversations stay meaningful, not scattered.');
+
+  const rhythmMeta = factors.dailyRhythm || {};
+  if ((rhythmMeta.cv || 0) >= 0.9) add('Anchor key conversations to fixed slots; keep evenings lighter so energy stays level.');
+  else if ((rhythmMeta.cv || 0) <= 0.35 && health.score >= 60) add('Your daily rhythm is stable—keep using check-in blocks rather than constant monitoring.');
+
+  const weekendMeta = factors.weekendRest || {};
+  if ((weekendMeta.weekendRatio || 0) >= 0.4) add('Protect weekends: set auto-replies or wrap up threads by Friday night.');
+  if ((weekendMeta.weekendRatio || 0) <= 0.1 && (health.score >= 55 || discipline.score >= 55)) add('Lovely weekend downtime—keep one optional offline ritual like nature walks or a hobby.');
+
+  const burstMeta = factors.burstBalance || {};
+  if ((burstMeta.peakHourRatio || 0) >= 0.28) add('Spread replies across the day; try 2–3 short check-in windows instead of one big binge.');
+  else if ((burstMeta.peakHourRatio || 0) <= 0.16 && (burstMeta.totalActivity || 0) >= 40) add('Nice pacing—continue batching responses so focus blocks remain clear.');
+
+  const intensityMeta = factors.intensity || {};
+  if ((intensityMeta.avgPerActiveDay || 0) > 160) add('Batch replies and take a 3-minute stretch after every ~30 messages to preserve stamina.');
+
+  const dayMeta = factors.daytimeBalance || {};
+  if ((dayMeta.daytimeRatio || 0) > 0 && (dayMeta.daytimeRatio || 0) < 0.5) add('Shift more conversations to daylight; put a hard stop on chats post 10 PM.');
+
+  const lengthMeta = factors.messageLength || {};
+  if ((lengthMeta.avgLen || 0) > 320) add('Break long updates into short bullets; it saves cognitive load for you and readers.');
+
+  const toneMeta = factors.communicationTone || {};
+  if ((toneMeta.uppercaseRatio || 0) >= 0.15) add('Swap ALL CAPS for calm sentences—people mirror your energy.');
+  if ((toneMeta.exclamPerMsg || 0) >= 1) add('Limit exclamation bursts; one well-placed “!” is plenty.');
+  if ((toneMeta.toxicRatio || 0) >= 0.08) add('Choose mindful words—count to five before replying when annoyed.');
+  if ((toneMeta.politeRatio || 0) >= 0.08 && discipline.score >= 60) add('Keep sprinkling gratitude; your polite tone uplifts the group.');
+
+  // Style-specific nudges
   const st = new Set(styleTraits || []);
-  if (st.has('shouty')) tips.push('Use normal case—ALL CAPS can feel intense to others.');
-  if (st.has('promotional')) tips.push('Limit links/self‑promotion; add value first.');
-  if (st.has('verbose')) tips.push('Aim for shorter messages or bullet points.');
-  if (st.has('excitable')) tips.push('Trim exclamation marks; a calmer tone improves clarity.');
-  if (st.has('concise')) tips.push('Your concise style is effective—keep it up.');
-  // De‑duplicate
-  const seen = new Set();
-  return tips.filter((t) => (seen.has(t) ? false : (seen.add(t), true)));
+  if (st.has('shouty')) add('Use normal case—ALL CAPS can feel intense to others.');
+  if (st.has('promotional')) add('Limit links/self-promo; lead with value and context.');
+  if (st.has('verbose')) add('Aim for shorter messages or bullet points to avoid fatigue.');
+  if (st.has('excitable')) add('Trim exclamation marks; a calmer tone improves clarity.');
+  if (st.has('concise')) add('Your concise style is effective—keep it up.');
+  if (st.has('emotive')) add('Balance emojis with clear text so meaning stays sharp.');
+  if (st.has('inquisitive')) add('Great curiosity—channel it into thoughtful questions that move conversations forward.');
+
+  return tips;
 }
 
 export function healthMiddleware() {
@@ -180,9 +250,17 @@ export function healthMiddleware() {
           const styleTraits = buildStyleTraits(summary);
           const scoreTips = buildScoreBasedTips(summary, health, discipline, catH, catD, styleTraits);
           const pTips = buildPersonalitySuggestions(summary.profile || {});
+          const highlights = (health.highlights || []).slice(0, 2);
+          const weekendRatio = Number(summary?.daily?.weekend_ratio ?? NaN);
+          const std7 = Number(summary?.daily?.last7?.std ?? NaN);
+          const pacingLine = Number.isFinite(weekendRatio) || Number.isFinite(std7)
+            ? `<b>Pacing:</b> ${Number.isFinite(weekendRatio) ? `weekend <b>${Math.round(weekendRatio * 100)}%</b>` : ''}${Number.isFinite(weekendRatio) && Number.isFinite(std7) ? ' · ' : ''}${Number.isFinite(std7) ? `7d std <b>${Math.round(std7)}</b>` : ''}`
+            : undefined;
           const msg = [
             `🧘 ${mentionHTML(ctx.from)} — <b>Gentle Reminder</b>`,
             `<b>Scores:</b> Health <b>${health.score}</b> (${catH.label}) · Discipline <b>${discipline.score}</b> (${catD.label})`,
+            highlights.length ? `<b>Focus:</b> ${esc(highlights.join('; '))}` : undefined,
+            pacingLine,
             aiStyle ? `<b>Style:</b> ${esc(aiStyle)}` : undefined,
             ai ? `<b>Tips:</b> ${esc(ai)}` : `<b>Tips:</b>\n• ${esc(scoreTips.concat(pTips.slice(0, 2)).slice(0, 5).join('\n• '))}`,
             '<i>Use /health for a full snapshot or /health_optout to disable.</i>',
@@ -233,6 +311,12 @@ export function healthMiddleware() {
     const ai = await aiAssessment(summary, discipline);
     const aiStyle = await aiPersonalityAssessment(summary);
     const scoreTips = buildScoreBasedTips(summary, health, discipline, catH, catD, styleTraits);
+    const highlights = (health.highlights || []).slice(0, 3);
+    const weekendRatio = Number(summary?.daily?.weekend_ratio ?? NaN);
+    const std7 = Number(summary?.daily?.last7?.std ?? NaN);
+    const pacingLine = Number.isFinite(weekendRatio) || Number.isFinite(std7)
+      ? `<b>Pacing:</b> ${Number.isFinite(weekendRatio) ? `weekend <b>${Math.round(weekendRatio * 100)}%</b>` : ''}${Number.isFinite(weekendRatio) && Number.isFinite(std7) ? ' · ' : ''}${Number.isFinite(std7) ? `7d std <b>${Math.round(std7)}</b>` : ''}`
+      : undefined;
     const hourFmt = (h) => `${String(h).padStart(2, '0')}:00`;
     const lines = [
       `🧭 <b>Your Health Snapshot</b> — ${mentionHTML(ctx.from)}`,
@@ -242,6 +326,8 @@ export function healthMiddleware() {
       `<b>Avg length:</b> <b>${summary.avg_message_len}</b> chars` ,
       `<b>Profile changes:</b> name <b>${summary?.profile?.changes?.name || 0}</b> · username <b>${summary?.profile?.changes?.username || 0}</b> · bio <b>${summary?.profile?.changes?.bio || 0}</b>`,
       `<b>Scores:</b> Health <b>${health.score}</b> (${catH.label}) · Discipline <b>${discipline.score}</b> (${catD.label})`,
+      highlights.length ? `<b>Drivers:</b> ${esc(highlights.join('; '))}` : undefined,
+      pacingLine,
       styleTraits.length ? `<b>Style:</b> ${esc(styleTraits.join(', '))}` : undefined,
       '',
       '✅ <b>Suggestions</b>',
@@ -270,6 +356,12 @@ export function healthMiddleware() {
     const ai = await aiAssessment(summary, discipline);
     const aiStyle = await aiPersonalityAssessment(summary);
     const scoreTips = buildScoreBasedTips(summary, health, discipline, catH, catD, styleTraits);
+    const highlights = (health.highlights || []).slice(0, 3);
+    const weekendRatio = Number(summary?.daily?.weekend_ratio ?? NaN);
+    const std7 = Number(summary?.daily?.last7?.std ?? NaN);
+    const pacingLine = Number.isFinite(weekendRatio) || Number.isFinite(std7)
+      ? `<b>Pacing:</b> ${Number.isFinite(weekendRatio) ? `weekend <b>${Math.round(weekendRatio * 100)}%</b>` : ''}${Number.isFinite(weekendRatio) && Number.isFinite(std7) ? ' · ' : ''}${Number.isFinite(std7) ? `7d std <b>${Math.round(std7)}</b>` : ''}`
+      : undefined;
     const hourFmt = (h) => `${String(h).padStart(2, '0')}:00`;
     const lines = [
       `🧭 <b>Health Snapshot</b> — ${mentionHTML(replyFrom || { id: targetId, first_name: 'User' })}`,
@@ -279,6 +371,8 @@ export function healthMiddleware() {
       `<b>Avg length:</b> <b>${summary.avg_message_len}</b> chars`,
       `<b>Profile changes:</b> name <b>${summary?.profile?.changes?.name || 0}</b> · username <b>${summary?.profile?.changes?.username || 0}</b> · bio <b>${summary?.profile?.changes?.bio || 0}</b>`,
       `<b>Scores:</b> Health <b>${health.score}</b> (${catH.label}) · Discipline <b>${discipline.score}</b> (${catD.label})`,
+      highlights.length ? `<b>Drivers:</b> ${esc(highlights.join('; '))}` : undefined,
+      pacingLine,
       styleTraits.length ? `<b>Style:</b> ${esc(styleTraits.join(', '))}` : undefined,
       '',
       '✅ <b>Suggestions</b>',
@@ -333,6 +427,13 @@ export function healthMiddleware() {
           return `${y}-${m}-${dd}`;
         };
         let w7 = 0, w30 = 0, streak = 0;
+        let active7 = 0, active30 = 0, longestBreak = 0, currentBreak = 0;
+        const last7Counts = [];
+        const last30Counts = [];
+        let weekendTotal = 0;
+        let weekdayTotal = 0;
+        let weekendActiveDays = 0;
+        let weekdayActiveDays = 0;
         for (let i = 0; i < 30; i++) {
           const d = new Date(now); d.setUTCDate(d.getUTCDate() - i);
           const key = todayKey(d);
@@ -340,18 +441,64 @@ export function healthMiddleware() {
           if (i < 7) w7 += c;
           w30 += c;
           if (c > 0 && streak === i) streak += 1;
+          if (c > 0) {
+            if (i < 7) active7 += 1;
+            active30 += 1;
+            currentBreak = 0;
+          } else {
+            currentBreak += 1;
+            if (currentBreak > longestBreak) longestBreak = currentBreak;
+          }
+          if (i < 7) last7Counts.push(c);
+          last30Counts.push(c);
+          const dow = d.getUTCDay();
+          if (dow === 0 || dow === 6) {
+            weekendTotal += c;
+            if (c > 0) weekendActiveDays += 1;
+          } else {
+            weekdayTotal += c;
+            if (c > 0) weekdayActiveDays += 1;
+          }
         }
         const act = Array.isArray(doc.activity_by_hour) ? doc.activity_by_hour : Array.from({length:24},()=>0);
         const hours = act.map((v, h) => ({ h, v })).sort((a, b) => (b.v - a.v));
         const topHours = hours.slice(0, 3).filter(x => (x.v || 0) > 0).map(x => x.h);
+        const dayStats7 = {
+          average: Number(avg(last7Counts).toFixed(2)),
+          std: Number(std(last7Counts).toFixed(2)),
+          max: Math.max(0, ...last7Counts),
+          min: last7Counts.length ? Math.min(...last7Counts) : 0,
+          zeros: last7Counts.filter((v) => (v || 0) === 0).length,
+        };
+        const dayStats30 = {
+          average: Number(avg(last30Counts).toFixed(2)),
+          std: Number(std(last30Counts).toFixed(2)),
+          max: Math.max(0, ...last30Counts),
+          min: last30Counts.length ? Math.min(...last30Counts) : 0,
+          zeros: last30Counts.filter((v) => (v || 0) === 0).length,
+        };
+        const weekendRatio = w30 > 0 ? Number((weekendTotal / w30).toFixed(3)) : 0;
         const summary = {
           week_count: w7,
           month_count: w30,
           streak_days: streak,
+          active_days: { last7: active7, last30: active30 },
+          longest_break_days: longestBreak,
           top_hours: topHours,
+          activity_by_hour: act,
           avg_message_len: doc.messages ? Math.round((doc.chars_sum || 0) / doc.messages) : (doc.avg_message_len || 0),
           sessions: { total: (doc.sessions_by_hour || []).reduce((a,b)=>a+(b||0),0), by_hour: doc.sessions_by_hour || [], late_total: (doc.sessions_by_hour||[]).reduce((acc,v,h)=>acc+((h<=5||h>=22)?(v||0):0),0) },
           comms: doc.comms || {},
+          totals: { messages: doc.messages || 0, events: doc.total_events || 0 },
+          daily: {
+            last7: dayStats7,
+            last30: dayStats30,
+            weekend_ratio: weekendRatio,
+            weekend_activity: weekendTotal,
+            weekday_activity: weekdayTotal,
+            weekend_active_days: weekendActiveDays,
+            weekday_active_days: weekdayActiveDays,
+          },
         };
         const h = computeHealthScore(summary);
         const dsc = await computeDisciplineScore(uid, chatId);
@@ -392,6 +539,13 @@ export function healthMiddleware() {
           return `${y}-${m}-${dd}`;
         };
         let w7 = 0, w30 = 0, streak = 0;
+        let active7 = 0, active30 = 0, longestBreak = 0, currentBreak = 0;
+        const last7Counts = [];
+        const last30Counts = [];
+        let weekendTotal = 0;
+        let weekdayTotal = 0;
+        let weekendActiveDays = 0;
+        let weekdayActiveDays = 0;
         for (let i = 0; i < 30; i++) {
           const d = new Date(now); d.setUTCDate(d.getUTCDate() - i);
           const key = todayKey(d);
@@ -399,18 +553,64 @@ export function healthMiddleware() {
           if (i < 7) w7 += c;
           w30 += c;
           if (c > 0 && streak === i) streak += 1;
+          if (c > 0) {
+            if (i < 7) active7 += 1;
+            active30 += 1;
+            currentBreak = 0;
+          } else {
+            currentBreak += 1;
+            if (currentBreak > longestBreak) longestBreak = currentBreak;
+          }
+          if (i < 7) last7Counts.push(c);
+          last30Counts.push(c);
+          const dow = d.getUTCDay();
+          if (dow === 0 || dow === 6) {
+            weekendTotal += c;
+            if (c > 0) weekendActiveDays += 1;
+          } else {
+            weekdayTotal += c;
+            if (c > 0) weekdayActiveDays += 1;
+          }
         }
         const act = Array.isArray(doc.activity_by_hour) ? doc.activity_by_hour : Array.from({length:24},()=>0);
         const hours = act.map((v, h) => ({ h, v })).sort((a, b) => (b.v - a.v));
         const topHours = hours.slice(0, 3).filter(x => (x.v || 0) > 0).map(x => x.h);
+        const dayStats7 = {
+          average: Number(avg(last7Counts).toFixed(2)),
+          std: Number(std(last7Counts).toFixed(2)),
+          max: Math.max(0, ...last7Counts),
+          min: last7Counts.length ? Math.min(...last7Counts) : 0,
+          zeros: last7Counts.filter((v) => (v || 0) === 0).length,
+        };
+        const dayStats30 = {
+          average: Number(avg(last30Counts).toFixed(2)),
+          std: Number(std(last30Counts).toFixed(2)),
+          max: Math.max(0, ...last30Counts),
+          min: last30Counts.length ? Math.min(...last30Counts) : 0,
+          zeros: last30Counts.filter((v) => (v || 0) === 0).length,
+        };
+        const weekendRatio = w30 > 0 ? Number((weekendTotal / w30).toFixed(3)) : 0;
         const summary = {
           week_count: w7,
           month_count: w30,
           streak_days: streak,
+          active_days: { last7: active7, last30: active30 },
+          longest_break_days: longestBreak,
           top_hours: topHours,
+          activity_by_hour: act,
           avg_message_len: doc.messages ? Math.round((doc.chars_sum || 0) / doc.messages) : (doc.avg_message_len || 0),
           sessions: { total: (doc.sessions_by_hour || []).reduce((a,b)=>a+(b||0),0), by_hour: doc.sessions_by_hour || [], late_total: (doc.sessions_by_hour||[]).reduce((acc,v,h)=>acc+((h<=5||h>=22)?(v||0):0),0) },
           comms: doc.comms || {},
+          totals: { messages: doc.messages || 0, events: doc.total_events || 0 },
+          daily: {
+            last7: dayStats7,
+            last30: dayStats30,
+            weekend_ratio: weekendRatio,
+            weekend_activity: weekendTotal,
+            weekday_activity: weekdayTotal,
+            weekend_active_days: weekendActiveDays,
+            weekday_active_days: weekdayActiveDays,
+          },
         };
         const h = computeHealthScore(summary);
         // Discipline score without chatId: global violations perspective
