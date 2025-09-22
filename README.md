@@ -131,6 +131,7 @@ Optional Supabase (for shared/multi-instance persistence):
   - `data/safe_terms_custom.json`: JSON array of strings
 - Notes:
   - Custom safelist terms are matched on the bot’s normalized text (lowercased, punctuation removed) to strip them before explicit detection.
+  - Common English inflections (`s`, `es`, `ed`, `ing`, `er`, etc.) are auto-safelisted—add the natural base form like `assistant` and the bot will also ignore `assistants`, `assisting`, `assisted`, etc.
   - Use `EXPLICIT_STRICT=true` to enable a broader auto-generated set of family+explicit phrases (Hinglish/Hindi) if your community requires it.
 
 ## Troubleshooting

@@ -35,14 +35,16 @@ export function containsExplicit(text = "") {
   try { normalized = normalized.replace(/sexagesimal|sexton(s)?/gi, ''); } catch {}
   // Quick precheck: if nothing resembles explicit even before stripping, bail out
   const preHit =
-    explicitTermsLoose.some((rx) => rx.test(normalized)) ||
-    runtimeExplicitLoose.some((rx) => rx.test(normalized)) ||
+    hasExplicitPatternOfMinimumLength(normalized, explicitTermsLoose) ||
+    hasExplicitPatternOfMinimumLength(normalized, runtimeExplicitLoose) ||
     // Optional: token-based profanity check via `allprofanity` package if installed
     hasProfanityToken(text);
   if (!preHit) return false;
   // Strip safe segments and retest to reduce false positives (e.g., class, analysis, gandhi)
   const stripped = stripSafeSegments(normalized);
-  const hitLoose = explicitTermsLoose.some((rx) => rx.test(stripped)) || runtimeExplicitLoose.some((rx) => rx.test(stripped));
+  const hitLoose =
+    hasExplicitPatternOfMinimumLength(stripped, explicitTermsLoose) ||
+    hasExplicitPatternOfMinimumLength(stripped, runtimeExplicitLoose);
   if (!hitLoose) return false;
   // Special-case guard: if only 'sex' remains but the raw text contains benign terms like 'sexton' or 'sexagesimal', treat as benign
   try {
@@ -60,6 +62,8 @@ export function overCharLimit(text = "", limit = 200) {
 }
 
 // --- Obfuscation handling ---
+const MIN_EXPLICIT_TOKEN_LEN = 3;
+
 // Build a loosened variant of patterns (no word boundaries) for normalized scan
 const explicitTermsLoose = explicitTerms.map((rx) => {
   const src = rx.source.replace(/\\b/g, '');
@@ -143,6 +147,27 @@ function normalizeForExplicit(input = '') {
   // Collapse repeated characters (3+ → 2) to catch exxxtreme repeats
   s = s.replace(/([a-z\u0900-\u097F])\1{2,}/g, '$1$1');
   return s;
+}
+
+function normalizedTokenLength(value = '') {
+  if (!value) return 0;
+  return value.replace(/[^a-z0-9\u0900-\u097F]+/gi, '').length;
+}
+
+function hasExplicitPatternOfMinimumLength(target = '', patterns = []) {
+  if (!target) return false;
+  for (const rx of patterns) {
+    if (!rx) continue;
+    rx.lastIndex = 0;
+    let match;
+    while ((match = rx.exec(target)) !== null) {
+      const piece = match[0] || '';
+      if (normalizedTokenLength(piece) >= MIN_EXPLICIT_TOKEN_LEN) return true;
+      if (!rx.global) break;
+      if (rx.lastIndex === match.index) rx.lastIndex += 1;
+    }
+  }
+  return false;
 }
 
 // Safe words/phrases to reduce false positives on normalized text

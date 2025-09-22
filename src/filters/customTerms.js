@@ -65,11 +65,59 @@ function normalizeLite(s = '') {
   return t;
 }
 
+function compileSafeRegexes(term = '') {
+  const normalized = normalizeLite(term);
+  if (!normalized) return [];
+  const patterns = new Map();
+  const addPattern = (value) => {
+    if (!value) return;
+    const key = String(value);
+    if (!key) return;
+    if (patterns.has(key)) return;
+    patterns.set(key, new RegExp(escapeRegex(key), 'gi'));
+  };
+  addPattern(normalized);
+  // Build a handful of simple English inflections to reduce manual safelist churn
+  if (/^[a-z]+$/.test(normalized) && normalized.length >= 4) {
+    const base = normalized;
+    const suffixes = new Set();
+    if (base.endsWith('sis')) {
+      suffixes.add(`${base.slice(0, -2)}es`);
+    } else if (base.endsWith('s')) {
+      suffixes.add(`${base}es`);
+    } else {
+      suffixes.add(`${base}s`);
+      suffixes.add(`${base}es`);
+    }
+    if (base.endsWith('e')) {
+      suffixes.add(`${base}d`);
+      if (base.length > 1) suffixes.add(`${base.slice(0, -1)}ing`);
+    } else {
+      suffixes.add(`${base}ed`);
+      suffixes.add(`${base}ing`);
+    }
+    suffixes.add(`${base}er`);
+    suffixes.add(`${base}ers`);
+    if (base.endsWith('y') && base.length > 3) {
+      const stem = base.slice(0, -1);
+      suffixes.add(`${stem}ies`);
+      suffixes.add(`${stem}ied`);
+      suffixes.add(`${stem}ier`);
+      suffixes.add(`${stem}iers`);
+      suffixes.add(`${stem}ying`);
+    }
+    for (const variant of suffixes) {
+      if (variant && variant.length >= 4) addPattern(variant);
+    }
+  }
+  return Array.from(patterns.values());
+}
+
 function loadSafeTxt(filePath) {
   try {
     const raw = fs.readFileSync(filePath, 'utf8');
     const lines = raw.split(/\r?\n/).map((l) => l.trim()).filter((l) => l && !l.startsWith('#'));
-    return lines.map((term) => new RegExp(escapeRegex(normalizeLite(term)), 'gi'));
+    return lines.flatMap((term) => compileSafeRegexes(term));
   } catch { return []; }
 }
 
@@ -79,8 +127,8 @@ function loadSafeJson(filePath) {
     const data = JSON.parse(raw);
     if (!Array.isArray(data)) return [];
     return data
-      .map((term) => (typeof term === 'string' ? new RegExp(escapeRegex(normalizeLite(term)), 'gi') : null))
-      .filter(Boolean);
+      .filter((term) => typeof term === 'string')
+      .flatMap((term) => compileSafeRegexes(term));
   } catch { return []; }
 }
 
@@ -154,12 +202,12 @@ function buildSafeFromList(list = []) {
     const seen = new Set();
     for (const term of list) {
       if (typeof term !== 'string') continue;
-      const n = normalizeLite(term);
-      if (!n) continue;
-      if (!RISKY_SUBSTRINGS.some((r) => n.includes(r))) continue;
-      if (seen.has(n)) continue;
-      seen.add(n);
-      out.push(new RegExp(escapeRegex(n), 'gi'));
+      const normalized = normalizeLite(term);
+      if (!normalized) continue;
+      if (!RISKY_SUBSTRINGS.some((r) => normalized.includes(r))) continue;
+      if (seen.has(normalized)) continue;
+      seen.add(normalized);
+      out.push(...compileSafeRegexes(term));
     }
     return out;
   } catch {
@@ -223,8 +271,8 @@ async function loadSafeSupabase() {
       const term = String(row.term ?? row.pattern ?? '').trim();
       if (!term) continue;
       try {
-        const rx = new RegExp(escapeRegex(normalizeLite(term)), 'gi');
-        customSafePatternsNormalized.push(rx);
+        const regexes = compileSafeRegexes(term);
+        if (regexes.length) customSafePatternsNormalized.push(...regexes);
       } catch {}
     }
   } catch {}
@@ -236,12 +284,9 @@ try { await loadSafeSupabase(); } catch {}
 export function addSafeTermNormalized(term = '') {
   const raw = String(term || '').trim();
   if (!raw) return false;
-  const n = normalizeLite(raw);
-  if (!n) return false;
-  try {
-    const rx = new RegExp(escapeRegex(n), 'gi');
-    customSafePatternsNormalized.push(rx);
-  } catch {}
+  const regexes = compileSafeRegexes(raw);
+  if (!regexes.length) return false;
+  try { customSafePatternsNormalized.push(...regexes); } catch {}
   // Best-effort persist to SAFE_TXT so it survives restarts
   try { fs.appendFileSync(SAFE_TXT, `${raw}\n`); } catch {}
   return true;
