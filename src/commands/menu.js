@@ -28,6 +28,7 @@ export const adminCommands = [
   { command: 'whitelist_remove', description: 'Remove a whitelisted user ID' },
   { command: 'whitelist_list', description: 'List chat whitelist' },
   { command: 'top_violators', description: 'List top violators' },
+  { command: 'group_kick_all_abort', description: 'Abort an in-flight group purge' },
 ];
 
 export const ownerPrivateCommands = [
