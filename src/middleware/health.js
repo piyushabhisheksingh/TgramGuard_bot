@@ -10,6 +10,23 @@ function esc(s = '') {
   return String(s).replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
 }
 
+const IST_FORMATTER = new Intl.DateTimeFormat('en-IN', {
+  timeZone: 'Asia/Kolkata',
+  dateStyle: 'medium',
+  timeStyle: 'short',
+});
+
+function formatIstTimestamp(iso) {
+  if (!iso) return '-';
+  try {
+    const dt = typeof iso === 'string' ? new Date(iso) : iso;
+    if (!(dt instanceof Date) || Number.isNaN(dt.getTime())) return '-';
+    return `${IST_FORMATTER.format(dt)} IST`;
+  } catch {
+    return '-';
+  }
+}
+
 function avg(arr = []) {
   if (!Array.isArray(arr) || arr.length === 0) return 0;
   return arr.reduce((sum, v) => sum + Number(v || 0), 0) / arr.length;
@@ -320,7 +337,7 @@ export function healthMiddleware() {
     const hourFmt = (h) => `${String(h).padStart(2, '0')}:00`;
     const lines = [
       `🧭 <b>Your Health Snapshot</b> — ${mentionHTML(ctx.from)}`,
-      `<b>Last seen:</b> <code>${esc(summary.last_seen || '-')}</code>`,
+      `<b>Last seen:</b> <code>${esc(formatIstTimestamp(summary.last_seen))}</code>`,
       `<b>Activity:</b> 7d <b>${summary.week_count}</b> · 30d <b>${summary.month_count}</b> · Streak <b>${summary.streak_days}d</b>`,
       `<b>Top hours:</b> ${summary.top_hours.length ? summary.top_hours.map(hourFmt).join(', ') : '-'}`,
       `<b>Avg length:</b> <b>${summary.avg_message_len}</b> chars` ,
@@ -365,7 +382,7 @@ export function healthMiddleware() {
     const hourFmt = (h) => `${String(h).padStart(2, '0')}:00`;
     const lines = [
       `🧭 <b>Health Snapshot</b> — ${mentionHTML(replyFrom || { id: targetId, first_name: 'User' })}`,
-      `<b>Last seen:</b> <code>${esc(summary.last_seen || '-')}</code>`,
+      `<b>Last seen:</b> <code>${esc(formatIstTimestamp(summary.last_seen))}</code>`,
       `<b>Activity:</b> 7d <b>${summary.week_count}</b> · 30d <b>${summary.month_count}</b> · Streak <b>${summary.streak_days}d</b>`,
       `<b>Top hours:</b> ${summary.top_hours.length ? summary.top_hours.map(hourFmt).join(', ') : '-'}`,
       `<b>Avg length:</b> <b>${summary.avg_message_len}</b> chars`,
