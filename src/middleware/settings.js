@@ -733,10 +733,22 @@ export function settingsMiddleware() {
       return ctx.reply('❌ <b>Target chat must be a group or supergroup.</b>', { parse_mode: 'HTML' });
     }
     let adminIds = new Set();
+    let botMember = null;
     try {
       const admins = await ctx.api.getChatAdministrators(chatId);
       adminIds = new Set(admins.map((a) => a.user?.id).filter((v) => Number.isFinite(v)));
+      botMember = admins.find((a) => a?.user?.id === ctx.me?.id) || null;
     } catch {}
+    if (!botMember) {
+      try {
+        botMember = await ctx.api.getChatMember(chatId, ctx.me?.id);
+      } catch {}
+    }
+    const canRestrict = Boolean(botMember?.status === 'administrator' && botMember?.can_restrict_members);
+    if (!canRestrict) {
+      groupKickAbortState.delete(abortKey);
+      return ctx.reply('⛔ <b>I need Ban Users permission in that group to run /group_kick_all.</b>', { parse_mode: 'HTML' });
+    }
     const memberIds = await getChatPresenceUserIds(chatId);
     if (!memberIds.length) {
       return ctx.reply('ℹ️ <b>No stored member list for this chat.</b> Presence tracking via Supabase is required.', { parse_mode: 'HTML' });
@@ -814,21 +826,28 @@ export function settingsMiddleware() {
                 await ctx.api.unbanChatMember(chatId, userId);
               } catch {}
               return;
-            } catch (err) {
-              const desc = String(err?.description || err?.message || err || '');
-              const isGone = /user not found/i.test(desc) || /member not found/i.test(desc) || /USER_ID_INVALID/i.test(desc);
-              if (isGone) {
-                alreadyGone += 1;
-                alreadyGoneIds.push(userId);
-                return;
-              }
-              const retryAfterSec = Number(err?.parameters?.retry_after || 0);
-              const tooMany = Number(err?.error_code) === 429 || /too many requests/i.test(desc);
-              if (tooMany && attempt < maxAttempts) {
-                const waitMs = (retryAfterSec > 0 ? retryAfterSec * 1000 : Math.pow(2, attempt) * 500);
-                await sleep(waitMs);
-                continue;
-              }
+          } catch (err) {
+            const desc = String(err?.description || err?.message || err || '');
+            const isGone = /user not found/i.test(desc) || /member not found/i.test(desc) || /USER_ID_INVALID/i.test(desc);
+            if (isGone) {
+              alreadyGone += 1;
+              alreadyGoneIds.push(userId);
+              return;
+            }
+            const retryAfterSec = Number(err?.parameters?.retry_after || 0);
+            const tooMany = Number(err?.error_code) === 429 || /too many requests/i.test(desc);
+            const insufficient = /not enough rights|rights to restrict|administrator rights required|have to be an admin/i.test(desc);
+            if (insufficient) {
+              failures.push({ userId, reason: desc.slice(0, 160) });
+              currentState.abort = true;
+              aborted = true;
+              return;
+            }
+            if (tooMany && attempt < maxAttempts) {
+              const waitMs = (retryAfterSec > 0 ? retryAfterSec * 1000 : Math.pow(2, attempt) * 500);
+              await sleep(waitMs);
+              continue;
+            }
               failures.push({ userId, reason: desc.slice(0, 160) });
               return;
             }
