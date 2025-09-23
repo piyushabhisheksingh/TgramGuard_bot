@@ -28,6 +28,67 @@ import { addExplicitRuntime, containsExplicit } from '../filters.js';
 
 const groupKickAbortState = new Map(); // chatId -> { abort, startedAt, startedBy, abortedBy, abortedAt }
 
+const taskQueue = [];
+let activeTask = null;
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+function isQueueIdle() {
+  return !activeTask && taskQueue.length === 0;
+}
+
+function processNextTask() {
+  if (activeTask || taskQueue.length === 0) return;
+  const nextTask = taskQueue.shift();
+  if (!nextTask) return;
+  if (nextTask.cancelled) {
+    processNextTask();
+    return;
+  }
+  activeTask = nextTask;
+  Promise.resolve()
+    .then(() => nextTask.run?.())
+    .catch((err) => {
+      console.error('[taskQueue] task failed:', err?.message || err);
+      if (typeof nextTask.onError === 'function') {
+        try { nextTask.onError(err); } catch (nested) {
+          console.error('[taskQueue] onError failed:', nested?.message || nested);
+        }
+      }
+    })
+    .finally(() => {
+      activeTask = null;
+      processNextTask();
+    });
+}
+
+function enqueueTask(task, { priority = false } = {}) {
+  if (priority) taskQueue.unshift(task);
+  else taskQueue.push(task);
+  processNextTask();
+}
+
+function clearTaskQueue({ abortActive = false } = {}) {
+  while (taskQueue.length) {
+    const task = taskQueue.shift();
+    if (typeof task.cancel === 'function') {
+      try { task.cancel({ reason: 'reset' }); } catch (err) {
+        console.warn('[taskQueue] failed to cancel queued task:', err?.message || err);
+      }
+    }
+    task.cancelled = true;
+  }
+  if (abortActive && activeTask && typeof activeTask.cancel === 'function') {
+    try { activeTask.cancel({ reason: 'reset' }); } catch (err) {
+      console.warn('[taskQueue] failed to cancel active task:', err?.message || err);
+    }
+  }
+}
+
+function findQueuedGroupKick(chatId) {
+  return taskQueue.find((task) => task.type === 'group_kick_all' && task.chatId === chatId && !task.cancelled);
+}
+
 // Utilities shared with security middleware (re-implemented minimal)
 async function isChatAdminWithBan(ctx, userId) {
   const chatId = ctx.chat?.id;
@@ -701,7 +762,8 @@ export function settingsMiddleware() {
     }
     const currentState = {
       abort: false,
-      startedAt: Date.now(),
+      started: false,
+      startedAt: null,
       startedBy: ctx.from?.id,
       abortedBy: null,
       abortedAt: null,
@@ -709,120 +771,184 @@ export function settingsMiddleware() {
     };
     groupKickAbortState.set(abortKey, currentState);
     let aborted = false;
-    try {
-      const header = [
-        `🚨 <b>Purging members from:</b> <code>${esc(chat?.title || String(chatId))}</code>`,
-        `<b>Seen members:</b> ${seen.length}`,
-        `<b>Attempting removals:</b> ${targets.length}`,
-        adminIds.size ? `🛡️ <b>Admins recorded:</b> ${adminIds.size}` : null,
-      ].filter(Boolean).join('\n');
-      await ctx.reply(header, { parse_mode: 'HTML' });
-      const parseDelay = (value, fallback) => {
-        const n = Number(value);
-        const base = Number.isFinite(n) ? n : fallback;
-        return Math.max(0, base || 0);
-      };
-      const minDelayMs = parseDelay(process.env.GROUP_KICK_DELAY_MIN_MS, 100);
-      const maxDelayMs = Math.max(minDelayMs, parseDelay(process.env.GROUP_KICK_DELAY_MAX_MS, 100));
-      const nextDelayMs = () => {
-        if (maxDelayMs <= minDelayMs) return minDelayMs;
-        return minDelayMs + Math.random() * (maxDelayMs - minDelayMs);
-      };
-      const kicked = [];
-      const failures = [];
-      let alreadyGone = 0;
-      const alreadyGoneIds = [];
-      for (const userId of targets) {
-        if (currentState.abort) {
-          aborted = true;
-          break;
-        }
-        try {
-          await ctx.api.banChatMember(chatId, userId, { until_date: Math.floor(Date.now() / 1000) + 60 });
-          kicked.push(userId);
+
+    const runPurge = async () => {
+      currentState.started = true;
+      currentState.startedAt = Date.now();
+      try {
+        const header = [
+          `🚨 <b>Purging members from:</b> <code>${esc(chat?.title || String(chatId))}</code>`,
+          `<b>Seen members:</b> ${seen.length}`,
+          `<b>Attempting removals:</b> ${targets.length}`,
+          adminIds.size ? `🛡️ <b>Admins recorded:</b> ${adminIds.size}` : null,
+        ].filter(Boolean).join('\n');
+        await ctx.reply(header, { parse_mode: 'HTML' });
+        const parseDelay = (value, fallback) => {
+          const n = Number(value);
+          const base = Number.isFinite(n) ? n : fallback;
+          return Math.max(0, base || 0);
+        };
+        const minDelayMs = parseDelay(process.env.GROUP_KICK_DELAY_MIN_MS, 40);
+        const maxDelayMs = Math.max(minDelayMs, parseDelay(process.env.GROUP_KICK_DELAY_MAX_MS, 180));
+        const concurrency = Math.max(1, Number(process.env.GROUP_KICK_CONCURRENCY || 5));
+        const workerCount = Math.min(concurrency, targets.length || concurrency);
+        const nextDelayMs = () => {
+          if (maxDelayMs <= minDelayMs) return minDelayMs;
+          return minDelayMs + Math.random() * (maxDelayMs - minDelayMs);
+        };
+        const kicked = [];
+        const failures = [];
+        let alreadyGone = 0;
+        const alreadyGoneIds = [];
+        let cursor = 0;
+
+        const attemptKick = async (userId) => {
+          let attempt = 0;
+          const maxAttempts = 3;
+          while (attempt < maxAttempts) {
+            attempt += 1;
+            try {
+              await ctx.api.banChatMember(chatId, userId, { until_date: Math.floor(Date.now() / 1000) + 60 });
+              kicked.push(userId);
+              try {
+                await ctx.api.unbanChatMember(chatId, userId);
+              } catch {}
+              return;
+            } catch (err) {
+              const desc = String(err?.description || err?.message || err || '');
+              const isGone = /user not found/i.test(desc) || /member not found/i.test(desc) || /USER_ID_INVALID/i.test(desc);
+              if (isGone) {
+                alreadyGone += 1;
+                alreadyGoneIds.push(userId);
+                return;
+              }
+              const retryAfterSec = Number(err?.parameters?.retry_after || 0);
+              const tooMany = Number(err?.error_code) === 429 || /too many requests/i.test(desc);
+              if (tooMany && attempt < maxAttempts) {
+                const waitMs = (retryAfterSec > 0 ? retryAfterSec * 1000 : Math.pow(2, attempt) * 500);
+                await sleep(waitMs);
+                continue;
+              }
+              failures.push({ userId, reason: desc.slice(0, 160) });
+              return;
+            }
+          }
+        };
+
+        const runWorker = async () => {
+          while (true) {
+            if (currentState.abort) {
+              aborted = true;
+              break;
+            }
+            const idx = cursor++;
+            if (idx >= targets.length) break;
+            const userId = targets[idx];
+            if (currentState.abort) {
+              aborted = true;
+              break;
+            }
+            await attemptKick(userId);
+            if (currentState.abort) {
+              aborted = true;
+              break;
+            }
+            const delayMs = Math.floor(nextDelayMs());
+            if (delayMs > 0) await sleep(delayMs);
+          }
+        };
+
+        const workers = Array.from({ length: workerCount }, () => runWorker());
+        await Promise.all(workers);
+        const pruneIds = Array.from(new Set([...kicked, ...alreadyGoneIds]));
+        let presenceRemoved = 0;
+        let presenceError;
+        if (pruneIds.length) {
           try {
-            await ctx.api.unbanChatMember(chatId, userId);
-          } catch {}
-        } catch (err) {
-          const desc = String(err?.description || err?.message || err || '');
-          if (/user not found/i.test(desc) || /member not found/i.test(desc) || /USER_ID_INVALID/i.test(desc)) {
-            alreadyGone += 1;
-            alreadyGoneIds.push(userId);
-          } else {
-            failures.push({ userId, reason: desc.slice(0, 160) });
+            const res = await removeChatPresenceUsers(chatId, pruneIds);
+            presenceRemoved = Number(res?.removed || 0);
+            if (res?.error) presenceError = res.error;
+          } catch (err) {
+            presenceError = err;
           }
         }
-        const delayMs = Math.floor(nextDelayMs());
-        if (delayMs > 0) {
-          await new Promise((resolve) => setTimeout(resolve, delayMs));
+        const summaryParts = [
+          `✅ <b>Removed:</b> ${kicked.length}`,
+          skippedAdmins ? `🛡️ <b>Skipped admins:</b> ${skippedAdmins}` : null,
+          skippedBot ? `🤖 <b>Skipped bot ID:</b> ${skippedBot}` : null,
+          alreadyGone ? `🚪 <b>Already absent:</b> ${alreadyGone}` : null,
+          failures.length ? `⚠️ <b>Failures:</b> ${failures.length}` : null,
+        ].filter(Boolean).join('\n');
+        const failureLines = failures.slice(0, 5).map((f) => `• <code>${f.userId}</code> — ${esc(f.reason)}`);
+        const extraLines = [];
+        if (aborted) {
+          extraLines.push('⛔ <b>Operation aborted.</b> Remaining members were not processed.');
+          if (currentState.abortedBy) {
+            extraLines.push(`⏹️ <b>Aborted by:</b> <code>${currentState.abortedBy}</code>`);
+          }
         }
-        if (currentState.abort) {
-          aborted = true;
-          break;
+        if (pruneIds.length) {
+          extraLines.push(`🗃️ <b>Presence records pruned:</b> ${presenceRemoved}`);
+          if (presenceError) {
+            const msg = String(presenceError?.message || presenceError || '').slice(0, 160);
+            extraLines.push(`⚠️ <b>Presence cleanup error:</b> <code>${esc(msg)}</code>`);
+          }
         }
-      }
-      const pruneIds = Array.from(new Set([...kicked, ...alreadyGoneIds]));
-      let presenceRemoved = 0;
-      let presenceError;
-      if (pruneIds.length) {
+        const body = (() => {
+          const main = extraLines.length ? [summaryParts, ...extraLines].join('\n') : summaryParts;
+          if (!failureLines.length) return main;
+          return [main, '', '<b>Failure samples</b>', ...failureLines].join('\n');
+        })();
+        await ctx.reply(body, { parse_mode: 'HTML' });
+        const noticeParts = [
+          '⚠️ Cleanup complete.',
+          kicked.length ? `Removed ${kicked.length} member${kicked.length === 1 ? '' : 's'}.` : null,
+          alreadyGone ? `${alreadyGone} already absent.` : null,
+        ].filter(Boolean).join(' ');
+        if (noticeParts) {
+          try {
+            // await ctx.api.sendMessage(chatId, noticeParts, { disable_web_page_preview: true });
+          } catch {}
+        }
         try {
-          const res = await removeChatPresenceUsers(chatId, pruneIds);
-          presenceRemoved = Number(res?.removed || 0);
-          if (res?.error) presenceError = res.error;
-        } catch (err) {
-          presenceError = err;
-        }
-      }
-      const summaryParts = [
-        `✅ <b>Removed:</b> ${kicked.length}`,
-        skippedAdmins ? `🛡️ <b>Skipped admins:</b> ${skippedAdmins}` : null,
-        skippedBot ? `🤖 <b>Skipped bot ID:</b> ${skippedBot}` : null,
-        alreadyGone ? `🚪 <b>Already absent:</b> ${alreadyGone}` : null,
-        failures.length ? `⚠️ <b>Failures:</b> ${failures.length}` : null,
-      ].filter(Boolean).join('\n');
-      const failureLines = failures.slice(0, 5).map((f) => `• <code>${f.userId}</code> — ${esc(f.reason)}`);
-      const extraLines = [];
-      if (aborted) {
-        extraLines.push('⛔ <b>Operation aborted.</b> Remaining members were not processed.');
-        if (currentState.abortedBy) {
-          extraLines.push(`⏹️ <b>Aborted by:</b> <code>${currentState.abortedBy}</code>`);
-        }
-      }
-      if (pruneIds.length) {
-        extraLines.push(`🗃️ <b>Presence records pruned:</b> ${presenceRemoved}`);
-        if (presenceError) {
-          const msg = String(presenceError?.message || presenceError || '').slice(0, 160);
-          extraLines.push(`⚠️ <b>Presence cleanup error:</b> <code>${esc(msg)}</code>`);
-        }
-      }
-      const body = (() => {
-        const main = extraLines.length ? [summaryParts, ...extraLines].join('\n') : summaryParts;
-        if (!failureLines.length) return main;
-        return [main, '', '<b>Failure samples</b>', ...failureLines].join('\n');
-      })();
-      await ctx.reply(body, { parse_mode: 'HTML' });
-      const noticeParts = [
-        '⚠️ Cleanup complete.',
-        kicked.length ? `Removed ${kicked.length} member${kicked.length === 1 ? '' : 's'}.` : null,
-        alreadyGone ? `${alreadyGone} already absent.` : null,
-      ].filter(Boolean).join(' ');
-      if (noticeParts) {
-        try {
-          // await ctx.api.sendMessage(chatId, noticeParts, { disable_web_page_preview: true });
+          await logAction(ctx, {
+            action: 'group_kick_all',
+            action_type: 'admin',
+            violation: '-',
+            chat: { id: chatId, title: chat?.title, username: chat?.username },
+            content: `removed=${kicked.length}; skipped_admins=${skippedAdmins}; skipped_bot=${skippedBot}; already_gone=${alreadyGone}; failures=${failures.length}; presence_removed=${presenceRemoved}; presence_error=${presenceError ? String(presenceError?.message || presenceError).slice(0, 120) : 'none'}; aborted=${aborted}`,
+          });
         } catch {}
+      } finally {
+        currentState.completed = true;
+        groupKickAbortState.delete(abortKey);
       }
-      try {
-        await logAction(ctx, {
-          action: 'group_kick_all',
-          action_type: 'admin',
-          violation: '-',
-          chat: { id: chatId, title: chat?.title, username: chat?.username },
-          content: `removed=${kicked.length}; skipped_admins=${skippedAdmins}; skipped_bot=${skippedBot}; already_gone=${alreadyGone}; failures=${failures.length}; presence_removed=${presenceRemoved}; presence_error=${presenceError ? String(presenceError?.message || presenceError).slice(0, 120) : 'none'}; aborted=${aborted}`,
-        });
-      } catch {}
-    } finally {
-      currentState.completed = true;
-      groupKickAbortState.delete(abortKey);
+    };
+
+    const task = {
+      type: 'group_kick_all',
+      chatId,
+      startedBy: ctx.from?.id,
+      run: runPurge,
+      cancel: ({ reason, abortedBy } = {}) => {
+        currentState.abort = true;
+        currentState.abortedBy = abortedBy ?? currentState.abortedBy;
+        currentState.abortedAt = Date.now();
+        currentState.completed = true;
+        task.cancelled = true;
+        groupKickAbortState.delete(abortKey);
+      },
+      onError: (err) => {
+        try {
+          ctx.reply(`❌ <b>Group purge failed:</b> <code>${esc(err?.message || err)}</code>`, { parse_mode: 'HTML' });
+        } catch {}
+      },
+    };
+
+    const idleBefore = isQueueIdle();
+    enqueueTask(task, { priority: true });
+    if (!idleBefore) {
+      await ctx.reply('⏳ Another task is running. Your purge has been queued with priority.', { parse_mode: 'HTML' });
     }
   });
 
@@ -844,6 +970,15 @@ export function settingsMiddleware() {
     }
     const abortKey = String(chatId);
     const state = groupKickAbortState.get(abortKey);
+    const queuedTask = findQueuedGroupKick(chatId);
+    if (queuedTask && (!state || !state.started)) {
+      const idx = taskQueue.indexOf(queuedTask);
+      if (idx >= 0) taskQueue.splice(idx, 1);
+      queuedTask.cancel?.({ abortedBy: ctx.from?.id });
+      queuedTask.cancelled = true;
+      groupKickAbortState.delete(abortKey);
+      return ctx.reply('⛔ <b>Purge removed from queue before it started.</b>', { parse_mode: 'HTML' });
+    }
     if (!state || state.completed) {
       return ctx.reply('ℹ️ <b>No active /group_kick_all run found for that chat.</b>', { parse_mode: 'HTML' });
     }
