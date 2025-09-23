@@ -127,8 +127,8 @@ export function settingsMiddleware() {
     can_pin_messages: false,
   };
 
-  const BL_DELAY_MIN = Math.max(0, Number(process.env.BLACKLIST_ENFORCE_DELAY_MIN_MS || 200));
-  const BL_DELAY_MAX_RAW = Number(process.env.BLACKLIST_ENFORCE_DELAY_MAX_MS || 1200);
+  const BL_DELAY_MIN = Math.max(0, Number(process.env.BLACKLIST_ENFORCE_DELAY_MIN_MS || 0));
+  const BL_DELAY_MAX_RAW = Number(process.env.BLACKLIST_ENFORCE_DELAY_MAX_MS || 0);
   const BL_DELAY_MAX = Number.isFinite(BL_DELAY_MAX_RAW) && BL_DELAY_MAX_RAW >= BL_DELAY_MIN ? BL_DELAY_MAX_RAW : BL_DELAY_MIN;
   const nextBlacklistDelay = () => {
     if (BL_DELAY_MAX <= BL_DELAY_MIN) return BL_DELAY_MIN;
@@ -722,8 +722,8 @@ export function settingsMiddleware() {
         const base = Number.isFinite(n) ? n : fallback;
         return Math.max(0, base || 0);
       };
-      const minDelayMs = parseDelay(process.env.GROUP_KICK_DELAY_MIN_MS, 2000);
-      const maxDelayMs = Math.max(minDelayMs, parseDelay(process.env.GROUP_KICK_DELAY_MAX_MS, 2000));
+      const minDelayMs = parseDelay(process.env.GROUP_KICK_DELAY_MIN_MS, 100);
+      const maxDelayMs = Math.max(minDelayMs, parseDelay(process.env.GROUP_KICK_DELAY_MAX_MS, 100));
       const nextDelayMs = () => {
         if (maxDelayMs <= minDelayMs) return minDelayMs;
         return minDelayMs + Math.random() * (maxDelayMs - minDelayMs);
