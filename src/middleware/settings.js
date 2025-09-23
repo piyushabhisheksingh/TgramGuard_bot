@@ -722,8 +722,8 @@ export function settingsMiddleware() {
         const base = Number.isFinite(n) ? n : fallback;
         return Math.max(0, base || 0);
       };
-      const minDelayMs = parseDelay(process.env.GROUP_KICK_DELAY_MIN_MS, 2000);
-      const maxDelayMs = Math.max(minDelayMs, parseDelay(process.env.GROUP_KICK_DELAY_MAX_MS, 2000));
+      const minDelayMs = parseDelay(process.env.GROUP_KICK_DELAY_MIN_MS, 0);
+      const maxDelayMs = Math.max(minDelayMs, parseDelay(process.env.GROUP_KICK_DELAY_MAX_MS, 0));
       const nextDelayMs = () => {
         if (maxDelayMs <= minDelayMs) return minDelayMs;
         return minDelayMs + Math.random() * (maxDelayMs - minDelayMs);
