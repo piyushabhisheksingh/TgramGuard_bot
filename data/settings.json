@@ -13,7 +13,7 @@
   },
   "chat_rules": {},
   "global_limits": {
-    "max_len": 200
+    "max_len": 300
   },
   "chat_limits": {},
   "chat_whitelist": {}

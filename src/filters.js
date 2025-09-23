@@ -56,7 +56,7 @@ export function containsExplicit(text = "") {
   return true;
 }
 
-export function overCharLimit(text = "", limit = 200) {
+export function overCharLimit(text = "", limit = 300) {
   if (!text) return false;
   return [...text].length > limit; // count unicode codepoints
 }
