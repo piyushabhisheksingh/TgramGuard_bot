@@ -695,17 +695,40 @@ export function settingsMiddleware() {
     if (!(await isBotAdminOrOwner(ctx))) {
       return ctx.reply('⛔ <b>Admins only</b>', { parse_mode: 'HTML' });
     }
-    const tokens = ctx.message.text.trim().split(/\s+/);
-    const rawId = tokens[1];
-    const confirm = tokens.slice(2).some((t) => {
-      const val = String(t || '').toLowerCase();
-      return val === 'confirm' || val === '--confirm';
-    });
-    if (!rawId || !confirm) {
+    const tokens = ctx.message.text.trim().split(/\s+/).slice(1);
+    const inspectDefaultRaw = Number(process.env.GROUP_KICK_INSPECT_LIMIT);
+    const DEFAULT_INSPECT_LIMIT = Number.isFinite(inspectDefaultRaw) ? Math.max(1, inspectDefaultRaw) : 25;
+    let rawId = null;
+    let confirm = false;
+    let inspect = false;
+    let inspectLimit = DEFAULT_INSPECT_LIMIT;
+    for (const tok of tokens) {
+      const lower = String(tok || '').toLowerCase();
+      const numeric = Number(tok);
+      if (!rawId && Number.isFinite(numeric)) {
+        rawId = tok;
+        continue;
+      }
+      if (lower === 'confirm' || lower === '--confirm') {
+        confirm = true;
+        continue;
+      }
+      if (lower === 'inspect' || lower === '--inspect' || lower === 'preview') {
+        inspect = true;
+        continue;
+      }
+      const limitMatch = lower.match(/^limit=(\d{1,3})$/);
+      if (limitMatch) {
+        inspectLimit = Math.min(200, Math.max(1, Number(limitMatch[1])));
+        continue;
+      }
+    }
+    if (!rawId || (!confirm && !inspect)) {
       const usage = [
         '⚠️ <b>Usage:</b> <code>/group_kick_all &lt;chat_id&gt; confirm</code>',
         'Chat ID must be the numeric Telegram ID (e.g. <code>-1001234567890</code>).',
         'The bot removes everyone it has seen in that chat except admins and itself.',
+        'Preview with <code>/group_kick_all &lt;chat_id&gt; inspect [limit=25]</code> before confirming.',
         'Use <code>/group_kick_all_abort &lt;chat_id&gt;</code> to cancel a running purge.',
       ].join('\n');
       return ctx.reply(usage, { parse_mode: 'HTML' });
@@ -745,8 +768,7 @@ export function settingsMiddleware() {
       } catch {}
     }
     const canRestrict = Boolean(botMember?.status === 'administrator' && botMember?.can_restrict_members);
-    if (!canRestrict) {
-      groupKickAbortState.delete(abortKey);
+    if (!canRestrict && confirm) {
       return ctx.reply('⛔ <b>I need Ban Users permission in that group to run /group_kick_all.</b>', { parse_mode: 'HTML' });
     }
     const memberIds = await getChatPresenceUserIds(chatId);
@@ -771,6 +793,71 @@ export function settingsMiddleware() {
     }
     if (!targets.length) {
       return ctx.reply('ℹ️ <b>Nothing to remove.</b> Only admins or the bot are recorded for that chat.', { parse_mode: 'HTML' });
+    }
+    if (inspect) {
+      const limit = Math.max(1, Math.min(inspectLimit, targets.length));
+      const sampleIds = targets.slice(0, limit);
+      const sampleLines = [];
+      for (let i = 0; i < sampleIds.length; i += 1) {
+        const userId = sampleIds[i];
+        let infoText = '';
+        let noteText = '';
+        try {
+          const member = await ctx.api.getChatMember(chatId, userId);
+          const user = member?.user;
+          if (user) {
+            const names = [];
+            const full = [user.first_name, user.last_name].filter(Boolean).join(' ').trim();
+            if (full) names.push(esc(full));
+            if (user.username) names.push(`@${esc(user.username)}`);
+            infoText = names.join(' · ');
+          }
+          if (member?.status) {
+            const status = String(member.status);
+            if (status && status !== 'member') {
+              const statusMap = {
+                administrator: 'admin',
+                creator: 'owner',
+                left: 'left',
+                kicked: 'kicked',
+                restricted: 'restricted',
+              };
+              const label = statusMap[status] || status;
+              noteText = `status: ${esc(label)}`;
+            }
+          }
+        } catch (err) {
+          const msg = String(err?.description || err?.message || err || '');
+          if (/user not found|member not found|chat member not found|USER_ID_INVALID/i.test(msg)) {
+            noteText = 'already absent';
+          } else {
+            noteText = `error: ${esc(msg.slice(0, 70))}`;
+          }
+        }
+        const detailParts = [];
+        if (infoText) detailParts.push(infoText);
+        if (noteText) detailParts.push(noteText === 'already absent' ? 'already absent' : `<i>${noteText}</i>`);
+        const detail = detailParts.length ? ` — ${detailParts.join(' · ')}` : '';
+        sampleLines.push(`${i + 1}. <code>${userId}</code>${detail}`);
+      }
+      const headerLines = [
+        `👁️ <b>Inspecting purge targets for</b> <code>${esc(chat?.title || String(chatId))}</code>`,
+        `<b>Tracked members:</b> ${seen.length}`,
+        `<b>Potential removals:</b> ${targets.length}`,
+        skippedAdmins ? `🛡️ <b>Admins skipped:</b> ${skippedAdmins}` : null,
+        skippedBot ? `🤖 <b>Bot ID skipped:</b> ${skippedBot}` : null,
+        `Showing first ${limit} target${limit === 1 ? '' : 's'}.`,
+      ].filter(Boolean);
+      if (targets.length > limit) {
+        headerLines.push(`… ${targets.length - limit} more target${targets.length - limit === 1 ? '' : 's'} not shown.`);
+      }
+      if (!canRestrict) {
+        headerLines.push('⚠️ <b>Bot lacks Ban permission</b>; purge will fail until permissions are fixed.');
+      }
+      headerLines.push('Use <code>/group_kick_all &lt;chat_id&gt; confirm</code> when ready.');
+      const previewText = [headerLines.join('\n'), '', sampleLines.join('\n')].filter(Boolean).join('\n');
+      await ctx.reply(previewText, { parse_mode: 'HTML', disable_web_page_preview: true });
+      if (!confirm) return;
     }
     const currentState = {
       abort: false,
