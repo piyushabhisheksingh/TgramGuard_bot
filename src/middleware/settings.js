@@ -813,6 +813,66 @@ export function settingsMiddleware() {
         let alreadyGone = 0;
         const alreadyGoneIds = [];
         let cursor = 0;
+        let processed = 0;
+        let progressMessage = null;
+        let lastProgressAt = 0;
+        let progressChain = Promise.resolve();
+        const PROGRESS_INTERVAL_MS = Math.max(5000, Number(process.env.GROUP_KICK_PROGRESS_INTERVAL_MS || 15000));
+        const PROGRESS_EVERY = Math.max(5, Number(process.env.GROUP_KICK_PROGRESS_EVERY || 25));
+
+        const formatProgress = ({ final = false } = {}) => {
+          const title = esc(chat?.title || String(chatId));
+          const pct = Math.min(100, Math.floor((processed / targets.length) * 100));
+          const lines = [];
+          lines.push(final ? (aborted ? '⛔ <b>Purge stopped</b>' : '✅ <b>Purge complete</b>') : '🚨 <b>Purge running…</b>');
+          lines.push(`<b>Chat:</b> <code>${title}</code>`);
+          lines.push(`<b>Processed:</b> ${processed}/${targets.length} (${pct}%)`);
+          if (kicked.length) lines.push(`• Removed: <b>${kicked.length}</b>`);
+          if (alreadyGone) lines.push(`• Already absent: <b>${alreadyGone}</b>`);
+          if (failures.length) lines.push(`• Failures: <b>${failures.length}</b>`);
+          if (skippedAdmins) lines.push(`• Skipped admins: <b>${skippedAdmins}</b>`);
+          if (skippedBot) lines.push(`• Skipped bot: <b>${skippedBot}</b>`);
+          if (!final && currentState.abort) lines.push('⏳ Waiting for workers to stop…');
+          return lines.join('\n');
+        };
+
+        const queueProgressUpdate = ({ force = false, final = false } = {}) => {
+          progressChain = progressChain.then(async () => {
+            if (!force) {
+              const now = Date.now();
+              const intervalOk = now - lastProgressAt >= PROGRESS_INTERVAL_MS;
+              const batchOk = processed % PROGRESS_EVERY === 0;
+              if (!intervalOk && !batchOk) return;
+              lastProgressAt = now;
+            }
+            const text = formatProgress({ final });
+            try {
+              if (!progressMessage) {
+                progressMessage = await ctx.reply(text, { parse_mode: 'HTML' });
+              } else {
+                const editChatId = progressMessage?.chat?.id ?? ctx.chat?.id;
+                if (!editChatId) throw new Error('missing chat id for progress edit');
+                const edited = await ctx.api.editMessageText(editChatId, progressMessage.message_id, text, { parse_mode: 'HTML' });
+                if (edited && typeof edited === 'object') progressMessage = edited;
+              }
+              lastProgressAt = Date.now();
+            } catch (err) {
+              const desc = String(err?.description || err?.message || err || '');
+              const isUnchanged = /message is not modified/i.test(desc);
+              if (!isUnchanged) {
+                if (/message to edit not found/i.test(desc)) {
+                  progressMessage = null;
+                }
+                console.warn('[group_kick_all] progress update failed:', desc);
+              }
+            }
+          }).catch((err) => {
+            console.warn('[group_kick_all] progress update chain failed:', err?.message || err);
+          });
+          return progressChain;
+        };
+
+        await queueProgressUpdate({ force: true });
 
         const attemptKick = async (userId) => {
           let attempt = 0;
@@ -868,6 +928,8 @@ export function settingsMiddleware() {
               break;
             }
             await attemptKick(userId);
+            processed += 1;
+            queueProgressUpdate();
             if (currentState.abort) {
               aborted = true;
               break;
@@ -879,6 +941,9 @@ export function settingsMiddleware() {
 
         const workers = Array.from({ length: workerCount }, () => runWorker());
         await Promise.all(workers);
+        processed = Math.min(targets.length, processed);
+        await queueProgressUpdate({ force: true, final: true });
+        await progressChain.catch(() => {});
         const pruneIds = Array.from(new Set([...kicked, ...alreadyGoneIds]));
         let presenceRemoved = 0;
         let presenceError;
