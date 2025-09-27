@@ -800,8 +800,8 @@ export function settingsMiddleware() {
           const base = Number.isFinite(n) ? n : fallback;
           return Math.max(0, base || 0);
         };
-        const minDelayMs = parseDelay(process.env.GROUP_KICK_DELAY_MIN_MS, 40);
-        const maxDelayMs = Math.max(minDelayMs, parseDelay(process.env.GROUP_KICK_DELAY_MAX_MS, 180));
+        const minDelayMs = parseDelay(process.env.GROUP_KICK_DELAY_MIN_MS, 2000);
+        const maxDelayMs = Math.max(minDelayMs, parseDelay(process.env.GROUP_KICK_DELAY_MAX_MS, 3000));
         const concurrency = Math.max(1, Number(process.env.GROUP_KICK_CONCURRENCY || 5));
         const workerCount = Math.min(concurrency, targets.length || concurrency);
         const nextDelayMs = () => {
