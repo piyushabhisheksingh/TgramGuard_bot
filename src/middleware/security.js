@@ -9,9 +9,14 @@ import { logAction, getUserRiskSummary, buildFunnyPrefix, removeChatPresenceUser
 import { classifyText as aiClassifyText, classifyLinks as aiClassifyLinks } from '../ai/provider_openai.js';
 import { addSafeTerms } from '../filters/customTerms.js';
 
-// Cache for user bio moderation status to reduce API calls
-// Map<userId, { hasLink: boolean, hasExplicit: boolean }>
+// Cache for user bio moderation status to reduce API calls.
+// Entries expire automatically so users are re-checked after updating their bio.
+// Map<userId, { until: number, data: { hasLink: boolean, hasExplicit: boolean, bio: string } }>
 const bioModerationCache = new Map();
+const BIO_CACHE_TTL_MS_RAW = Number(process.env.BIO_CACHE_TTL_MS);
+const BIO_CACHE_TTL_MS = Number.isFinite(BIO_CACHE_TTL_MS_RAW)
+  ? Math.max(0, BIO_CACHE_TTL_MS_RAW)
+  : 5 * 60 * 1000; // default 5 minutes
 
 // Cache for chat admin status lookups with TTL
 // Map<`${chatId}:${userId}`, { isAdmin: boolean, until: number }>
@@ -340,20 +345,45 @@ async function ensureBotCanDelete(ctx) {
   return false;
 }
 
+function readBioCache(userId) {
+  const cached = bioModerationCache.get(userId);
+  if (!cached) return null;
+  // Legacy shape (pre-TTL) — drop so the value can be refreshed
+  if (cached && typeof cached === 'object' && 'hasLink' in cached) {
+    bioModerationCache.delete(userId);
+    return null;
+  }
+  const until = Number(cached?.until);
+  if (!Number.isFinite(until) || until <= Date.now()) {
+    bioModerationCache.delete(userId);
+    return null;
+  }
+  return cached.data || null;
+}
+
+function writeBioCache(userId, data) {
+  if (BIO_CACHE_TTL_MS === 0) {
+    bioModerationCache.delete(userId);
+    return data;
+  }
+  const until = Date.now() + BIO_CACHE_TTL_MS;
+  bioModerationCache.set(userId, { until, data });
+  return data;
+}
+
 async function checkUserBioStatus(ctx, userId) {
-  if (bioModerationCache.has(userId)) return bioModerationCache.get(userId);
+  const cached = readBioCache(userId);
+  if (cached) return cached;
   try {
     const chat = await ctx.api.getChat(userId);
     const bio = chat?.bio || '';
     const hasLink = bio ? textHasLink(bio) : false;
     const hasExplicit = bio ? containsExplicit(bio) : false;
     const res = { hasLink, hasExplicit, bio };
-    bioModerationCache.set(userId, res);
-    return res;
+    return writeBioCache(userId, res);
   } catch (_) {
     const res = { hasLink: false, hasExplicit: false, bio: '' };
-    bioModerationCache.set(userId, res);
-    return res;
+    return writeBioCache(userId, res);
   }
 }
 

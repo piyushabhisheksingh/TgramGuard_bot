@@ -30,21 +30,83 @@ const groupKickAbortState = new Map(); // chatId -> { abort, startedAt, startedB
 
 const taskQueue = [];
 let activeTask = null;
+let taskCounter = 0;
+
+const PRIORITY_MAP = {
+  low: -10,
+  normal: 0,
+  default: 0,
+  medium: 5,
+  high: 10,
+  urgent: 20,
+  critical: 100,
+};
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+function normalizePriority(priority) {
+  if (priority === true) return PRIORITY_MAP.high;
+  if (priority === false || priority == null) return PRIORITY_MAP.default;
+  if (typeof priority === 'number' && Number.isFinite(priority)) return priority;
+  if (typeof priority === 'string') {
+    const key = priority.toLowerCase();
+    if (Object.prototype.hasOwnProperty.call(PRIORITY_MAP, key)) return PRIORITY_MAP[key];
+    const parsed = Number(priority);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return PRIORITY_MAP.default;
+}
+
+function pruneQueue() {
+  for (let i = taskQueue.length - 1; i >= 0; i -= 1) {
+    if (taskQueue[i]?.cancelled) taskQueue.splice(i, 1);
+  }
+}
+
 function isQueueIdle() {
+  pruneQueue();
   return !activeTask && taskQueue.length === 0;
 }
 
-function processNextTask() {
-  if (activeTask || taskQueue.length === 0) return;
-  const nextTask = taskQueue.shift();
-  if (!nextTask) return;
-  if (nextTask.cancelled) {
-    processNextTask();
-    return;
+function selectNextTask() {
+  pruneQueue();
+  if (!taskQueue.length) return null;
+  let bestIndex = -1;
+  let bestTask = null;
+  for (let i = 0; i < taskQueue.length; i += 1) {
+    const candidate = taskQueue[i];
+    if (!candidate || candidate.cancelled) continue;
+    if (!bestTask) {
+      bestTask = candidate;
+      bestIndex = i;
+      continue;
+    }
+    const candidatePriority = Number.isFinite(candidate.priority) ? candidate.priority : PRIORITY_MAP.default;
+    const bestPriority = Number.isFinite(bestTask.priority) ? bestTask.priority : PRIORITY_MAP.default;
+    if (candidatePriority > bestPriority) {
+      bestTask = candidate;
+      bestIndex = i;
+      continue;
+    }
+    const candidateSeq = Number.isFinite(candidate.seq) ? candidate.seq : Number.MAX_SAFE_INTEGER;
+    const bestSeq = Number.isFinite(bestTask.seq) ? bestTask.seq : Number.MAX_SAFE_INTEGER;
+    if (candidatePriority === bestPriority && candidateSeq < bestSeq) {
+      bestTask = candidate;
+      bestIndex = i;
+    }
   }
+  if (bestIndex === -1) {
+    taskQueue.length = 0;
+    return null;
+  }
+  const [nextTask] = taskQueue.splice(bestIndex, 1);
+  return nextTask || null;
+}
+
+function processNextTask() {
+  if (activeTask) return;
+  const nextTask = selectNextTask();
+  if (!nextTask) return;
   activeTask = nextTask;
   Promise.resolve()
     .then(() => nextTask.run?.())
@@ -62,10 +124,15 @@ function processNextTask() {
     });
 }
 
-function enqueueTask(task, { priority = false } = {}) {
-  if (priority) taskQueue.unshift(task);
-  else taskQueue.push(task);
+function enqueueTask(task, { priority = 0 } = {}) {
+  const prio = normalizePriority(priority);
+  const entry = task;
+  entry.priority = prio;
+  entry.seq = ++taskCounter;
+  entry.cancelled = Boolean(entry.cancelled);
+  taskQueue.push(entry);
   processNextTask();
+  return entry;
 }
 
 function clearTaskQueue({ abortActive = false } = {}) {
@@ -78,6 +145,7 @@ function clearTaskQueue({ abortActive = false } = {}) {
     }
     task.cancelled = true;
   }
+  pruneQueue();
   if (abortActive && activeTask && typeof activeTask.cancel === 'function') {
     try { activeTask.cancel({ reason: 'reset' }); } catch (err) {
       console.warn('[taskQueue] failed to cancel active task:', err?.message || err);
@@ -86,6 +154,7 @@ function clearTaskQueue({ abortActive = false } = {}) {
 }
 
 function findQueuedGroupKick(chatId) {
+  pruneQueue();
   return taskQueue.find((task) => task.type === 'group_kick_all' && task.chatId === chatId && !task.cancelled);
 }
 
@@ -1117,7 +1186,7 @@ export function settingsMiddleware() {
     };
 
     const idleBefore = isQueueIdle();
-    enqueueTask(task, { priority: true });
+    enqueueTask(task, { priority: 'critical' });
     if (!idleBefore) {
       await ctx.reply('⏳ Another task is running. Your purge has been queued with priority.', { parse_mode: 'HTML' });
     }
