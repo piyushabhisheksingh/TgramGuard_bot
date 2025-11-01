@@ -137,13 +137,15 @@ function normalizeForExplicit(input = '') {
   s = s.replace(/[01!34@\$5789µаеорсхуіїјαβγδεζηικλμνξοπρσςτυφχψω٠-٩०-९]/g, (ch) => map[ch] || ch);
   // Transliterate Devanagari → Latin (rough mapping) to catch mixed-script abuse
   s = transliterateDevanagari(s);
-  // Remove separators, whitespace, punctuation, symbols (Unicode-aware) to collapse obfuscations like s e x, s.e.x, s_e-x, s•e•x
+  // Remove punctuation and symbols but keep whitespace so we don't treat spacing as obfuscation
   try {
-    s = s.replace(/[\p{Z}\s\p{P}\p{S}]+/gu, '');
+    s = s.replace(/[\p{P}\p{S}]+/gu, ' ');
   } catch {
     // Fallback for environments without Unicode property escapes
-    s = s.replace(/[\s._\-\|*`'"~^+\=\/\\()\[\]{}:,;<>]+/g, '');
+    s = s.replace(/[._\-\|*`'"~^+\=\/\\()\[\]{}:,;<>]+/g, ' ');
   }
+  // Collapse excessive whitespace for stability while preserving intentional spaces
+  s = s.replace(/\s+/g, ' ').trim();
   // Collapse repeated characters (3+ → 2) to catch exxxtreme repeats
   s = s.replace(/([a-z\u0900-\u097F])\1{2,}/g, '$1$1');
   return s;
