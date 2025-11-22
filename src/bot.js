@@ -6,11 +6,9 @@ import throttlerModule from '@grammyjs/transformer-throttler';
 import http from 'node:http';
 import { securityMiddleware } from './middleware/security.js';
 import { settingsMiddleware } from './middleware/settings.js';
-import { healthMiddleware } from './middleware/health.js';
 import { bootstrapAdminsFromEnv, areCommandsInitialized, markCommandsInitialized, getBlacklistEntry } from './store/settings.js';
 import { logActionPinned, logAction, recordUserPresence, removeChatPresenceUsers } from './logger.js';
 import { defaultCommands, adminCommands, ownerPrivateCommands } from './commands/menu.js';
-import { startExplicitLearner } from './learning/explicit_learner.js';
 
 const { apiThrottler } = throttlerModule;
 const token = process.env.BOT_TOKEN;
@@ -43,30 +41,6 @@ bot.api.config.use(autoRetry());
 // Flood limits: queue API calls to respect Telegram rate limits
 bot.api.config.use(apiThrottler());
 
-// Auto-delete bot's own messages after a delay (default 60s). Exempts log chat.
-(() => {
-  const originalSendMessage = bot.api.sendMessage.bind(bot.api);
-  const FLAG = String(process.env.BOT_REPLY_CLEANUP ?? 'true').toLowerCase();
-  const enabled = FLAG === '1' || FLAG === 'true' || FLAG === 'yes' || FLAG === 'on';
-  const ttlSec = Number(process.env.BOT_REPLY_CLEANUP_SECONDS || 60);
-  const LOG_CHAT_ID = process.env.LOG_CHAT_ID;
-  bot.api.sendMessage = async function(chatId, text, opts) {
-    const res = await originalSendMessage(chatId, text, opts);
-    try {
-      if (!enabled) return res;
-      // Skip logger channel
-      if (LOG_CHAT_ID && String(chatId) === String(LOG_CHAT_ID)) return res;
-      const ms = Math.max(1, Math.trunc(ttlSec)) * 1000;
-      const id = res?.message_id;
-      if (!id) return res;
-      setTimeout(() => {
-        bot.api.deleteMessage(chatId, id).catch(() => {});
-      }, ms);
-    } catch {}
-    return res;
-  };
-})();
-
 // Concurrency safety: ensure per-chat (or user) sequential processing
 bot.use(
   sequentialize((ctx) => {
@@ -82,9 +56,6 @@ bot.use(securityMiddleware());
 
 // Settings middleware and commands
 bot.use(settingsMiddleware());
-
-// Health middleware: track user activity and offer suggestions
-bot.use(healthMiddleware());
 
 // (message and edited_message handling moved into security middleware)
 
@@ -264,6 +235,10 @@ async function ensureBotCommands() {
     const forceFlag = String(process.env.FORCE_SET_COMMANDS || '').toLowerCase();
     const force = forceFlag === '1' || forceFlag === 'true' || forceFlag === 'yes' || forceFlag === 'on';
     if (already && !force) return;
+    // Clear any previously published commands so only the current set remains active
+    await bot.api.deleteMyCommands({ scope: { type: 'default' } });
+    await bot.api.deleteMyCommands({ scope: { type: 'all_chat_administrators' } });
+    await bot.api.deleteMyCommands({ scope: { type: 'all_private_chats' } });
     // Default (all users) concise commands
     await bot.api.setMyCommands(defaultCommands, { scope: { type: 'default' } });
     // Admin commands menu for all chat administrators
@@ -283,8 +258,6 @@ const allowedUpdates = ['message', 'edited_message', 'my_chat_member', 'callback
 const USE_WEBHOOK = Boolean(process.env.WEBHOOK_URL);
 // Kick off first-run command setup (best-effort)
 ensureBotCommands();
-// Start group-specific explicit learner if configured
-const explicitLearnerCtl = startExplicitLearner(bot);
 if (USE_WEBHOOK) {
   const PORT = Number(process.env.PORT || 3000);
   const SECRET = process.env.WEBHOOK_SECRET;
@@ -301,7 +274,6 @@ if (USE_WEBHOOK) {
     });
     // Graceful shutdown
     const shutdown = () => {
-      try { explicitLearnerCtl?.stop?.(); } catch {}
       server.close(() => process.exit(0));
     };
     process.once('SIGINT', shutdown);
@@ -311,8 +283,8 @@ if (USE_WEBHOOK) {
     const concurrency = Number(process.env.RUNNER_CONCURRENCY || 100);
     const runner = run(bot, { fetch: { allowed_updates: allowedUpdates }, runner: { concurrency } });
     console.log('Runner started (fallback).');
-    process.once('SIGINT', () => { try { explicitLearnerCtl?.stop?.(); } catch {} runner.stop(); });
-    process.once('SIGTERM', () => { try { explicitLearnerCtl?.stop?.(); } catch {} runner.stop(); });
+    process.once('SIGINT', () => { runner.stop(); });
+    process.once('SIGTERM', () => { runner.stop(); });
   }
 } else {
   // High-load long polling with concurrency
@@ -320,6 +292,6 @@ if (USE_WEBHOOK) {
   const runner = run(bot, { fetch: { allowed_updates: allowedUpdates }, runner: { concurrency } });
   console.log('Runner started. Listening for updates...');
   // Graceful shutdown
-  process.once('SIGINT', () => { try { explicitLearnerCtl?.stop?.(); } catch {} runner.stop(); });
-  process.once('SIGTERM', () => { try { explicitLearnerCtl?.stop?.(); } catch {} runner.stop(); });
+  process.once('SIGINT', () => { runner.stop(); });
+  process.once('SIGTERM', () => { runner.stop(); });
 }
