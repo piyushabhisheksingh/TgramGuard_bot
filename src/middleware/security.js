@@ -46,96 +46,6 @@ function mentionHTML(user) {
   return `<a href="tg://user?id=${id}">${escapeHtml(name)} [${id}]</a>`;
 }
 
-// Light-hearted Hinglish suffixes per violation type (playful only)
-const FUNNY_SUFFIX = {
-  no_links: [
-    'Link mat chipkao, bhai! 😅',
-    'Yahan links allowed nahi, samjhe? 🙅‍♂️',
-    'Link ka mann hai? DM karo. 😉',
-    'Hyperlink ka scene nahi yahan. 🚫🔗',
-    'Link ki ladai ghar pe, yahan nahi. 😤',
-    'Link daalne ka fine: 100 push-ups. 💪',
-    'Clickbait se zyada, dimag use karo. 🧠',
-    'Link ka bhoot utaro, content do. 👻',
-    'Copy-paste ki jagah, apni soch dikhado. 🧩',
-    'Link free zone hai, vibes nahi. 🌈',
-  ],
-  no_explicit: [
-    'Thoda sanskaari bano, yaar. 🙏',
-    'Gandi baatein ghar pe, please. 😜',
-    'PG-13 rakho, bro. 🎬',
-    'Family-friendly vibes only. 🧸',
-    'Itna tharki mat bano, champ. 😌',
-    'Internet ka chacha nahi banna. 🤓',
-    'Sanskaari filter ON rakho. 🧼',
-    'Ghar wale dekh lenge, sambhal ke. 👀',
-    'Public place hai, decency maintain karo. 🧑‍⚖️',
-    'Ye group hai, private chat nahi. 🚪',
-  ],
-  bio_block: [
-    'Pehle bio sudharo, phir aao. 😌',
-    'Bio saaf rakho, dil saaf rakho. ✨',
-    'Bio mein sabak likho, link nahi. 📚',
-    'Bio ko detox do, zindagi ko relax. 🧘',
-    'Bio dekh ke lagta hai over-smart ho. 🤓',
-    'Bio sahi, entry sahi. Gatekeeper happy. 🚪🙂',
-    'Bio me data, link nahi. USB nahi ho tum. 🔌',
-  ],
-  max_len: [
-    'Short & sweet rakho. 😎',
-    'TL;DR mat bano, dost. 📏',
-    'Novel baad mein likhna, yahan nahi. 📖',
-    'Ek line ka pyaar bhi hota hai. 💬',
-    'Point pe aao, TED talk nahi. 🎤',
-    'Twitter thread banane ka mann hai? Wahan jao. 🧵',
-    'Short message, long impact. 🎯',
-  ],
-  no_edit: [
-    'Edit mat khelo, sahi bhejo. ✍️',
-    'Ek baar mein pyaar. 💌',
-    'Palti maarna band karo, hero. 🔄',
-    'Ctrl+Z ka nasha chhodo. 🧪',
-    'Edit ki addiction chhodo, detox lo. 🧴',
-    'Draft banao, phir bhejo — pro move. 🧠',
-    'Message Jenga mat khelo. 🧱',
-  ],
-  name_no_links: [
-    'Naam se link hatao, hero! 🏷️',
-    'Naam simple rakho, champ. 🫶',
-    'Username ko gym bhejo, link nahi. 🏋️‍♂️',
-    'Naam cool, link null. 😎',
-    'Naam ko sanitizer chahiye, link nahi. 🧴',
-    'Naam ≠ billboard. Ads band karo. 🪧',
-    'Naam me pyaar, link na yaar. 💙',
-  ],
-  name_no_explicit: [
-    'Naam thoda seedha rakho. 🙂',
-    'Decent naam, decent fame. 🌟',
-    'Naam sanskaari = respect zyada. 🪷',
-    'Naam pe control, fame automatic. 🚀',
-    'Naam ko PG rating do, pls. 🏷️',
-    'Naam sweet rakho, treat milti rahegi. 🍬',
-    'Cool naam, cool vibes. ❄️',
-  ],
-  default: [
-    'Shant raho, mast raho. 😌',
-    'Rules ka dhyaan rakho, yaaro. 📜',
-    'Mod ke saath pyaar se raho. 💙',
-    'Yeh group, tumhara ghar nahi. 🏠',
-    'Internet par bhi tameez hoti hai. 🫡',
-    'Good vibes only, baki sab side me. ✨',
-    'Respect rakho, fun double hoga. 🎉',
-  ],
-};
-
-// Removed harsher variants: only playful messaging is kept
-
-const EXTRA_SPICE = [
-  'Samjhe ya samjhaun? 😉',
-  'Bolo, seekh gaye? 🤝',
-  'Next time better hoga, right? 👍',
-];
-
 const BLACKLIST_MUTE_PERMISSIONS = {
   can_send_messages: false,
   can_send_audios: false,
@@ -151,22 +61,6 @@ const BLACKLIST_MUTE_PERMISSIONS = {
   can_invite_users: false,
   can_pin_messages: false,
 };
-
-function spiceProbability() {
-  const level = String(process.env.HUMOR_SPICE || 'spicy').toLowerCase();
-  // mild -> 0.15 harsh chance, normal -> 0.35, spicy -> 0.75
-  if (level.startsWith('mild')) return 0.15;
-  if (level.startsWith('norm')) return 0.35;
-  return 0.75;
-}
-
-function funnySuffix(violation = 'default') {
-  const pool = FUNNY_SUFFIX[violation] || FUNNY_SUFFIX.default;
-  const line = pool[Math.floor(Math.random() * pool.length)];
-  // 40% chance to append a tiny extra quip
-  const extra = Math.random() < 0.4 ? ' ' + EXTRA_SPICE[Math.floor(Math.random() * EXTRA_SPICE.length)] : '';
-  return ' ' + line + extra;
-}
 
 // Cache funny prefixes per (chat,user) for 10 minutes to avoid constant DB hits
 const funnyPrefixCache = new Map(); // key `${chatId}:${userId}` -> { until, prefix }
@@ -204,14 +98,7 @@ async function mentionPlainWithPrefix(ctx, user, currentViolation) {
 
 // Conditional funny suffix based on settings: can be toggled globally or per chat
 async function maybeSuffix(ctx, violation = 'default') {
-  try {
-    const chatId = ctx.chat?.id;
-    if (!Number.isFinite(chatId)) return '';
-    const enabled = await isRuleEnabled('funny_suffix', chatId);
-    return enabled ? funnySuffix(violation) : '';
-  } catch {
-    return funnySuffix(violation);
-  }
+  return '';
 }
 
 async function notifyAndCleanup(ctx, text, seconds = 8) {
