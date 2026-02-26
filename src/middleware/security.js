@@ -61,6 +61,127 @@ const BLACKLIST_MUTE_PERMISSIONS = {
   can_pin_messages: false,
 };
 
+// Realtime anti-spam / probation state (in-memory)
+const floodState = new Map(); // key -> number[] timestamps (ms)
+const duplicateState = new Map(); // key -> { text: string, count: number, lastTs: number }
+const newMemberProbationState = new Map(); // key -> until timestamp (ms)
+let lastSpamStatePruneAt = 0;
+
+const FLOOD_WINDOW_SEC_RAW = Number(process.env.FLOOD_WINDOW_SECONDS);
+const FLOOD_WINDOW_MS = Number.isFinite(FLOOD_WINDOW_SEC_RAW)
+  ? Math.max(1, FLOOD_WINDOW_SEC_RAW) * 1000
+  : 10 * 1000;
+const FLOOD_MAX_MESSAGES_RAW = Number(process.env.FLOOD_MAX_MESSAGES);
+const FLOOD_MAX_MESSAGES = Number.isFinite(FLOOD_MAX_MESSAGES_RAW)
+  ? Math.max(2, Math.trunc(FLOOD_MAX_MESSAGES_RAW))
+  : 6;
+const FLOOD_MUTE_SECONDS_RAW = Number(process.env.FLOOD_MUTE_SECONDS);
+const FLOOD_MUTE_SECONDS = Number.isFinite(FLOOD_MUTE_SECONDS_RAW)
+  ? Math.max(0, Math.trunc(FLOOD_MUTE_SECONDS_RAW))
+  : 60;
+
+const DUP_WINDOW_SEC_RAW = Number(process.env.DUPLICATE_WINDOW_SECONDS);
+const DUP_WINDOW_MS = Number.isFinite(DUP_WINDOW_SEC_RAW)
+  ? Math.max(1, DUP_WINDOW_SEC_RAW) * 1000
+  : 120 * 1000;
+const DUP_REPEAT_RAW = Number(process.env.DUPLICATE_REPEAT_LIMIT);
+const DUP_REPEAT_LIMIT = Number.isFinite(DUP_REPEAT_RAW)
+  ? Math.max(2, Math.trunc(DUP_REPEAT_RAW))
+  : 3;
+const DUP_MIN_LEN_RAW = Number(process.env.DUPLICATE_MIN_LENGTH);
+const DUP_MIN_LENGTH = Number.isFinite(DUP_MIN_LEN_RAW)
+  ? Math.max(1, Math.trunc(DUP_MIN_LEN_RAW))
+  : 8;
+
+const NEW_MEMBER_PROBATION_MIN_RAW = Number(process.env.NEW_MEMBER_PROBATION_MINUTES);
+const NEW_MEMBER_PROBATION_MS = Number.isFinite(NEW_MEMBER_PROBATION_MIN_RAW)
+  ? Math.max(0, NEW_MEMBER_PROBATION_MIN_RAW) * 60 * 1000
+  : 30 * 60 * 1000;
+
+function spamStateKey(chatId, userId) {
+  return `${chatId}:${userId}`;
+}
+
+function normalizeDuplicateText(text = '') {
+  return String(text || '')
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function messageHasMedia(msg = {}) {
+  return Boolean(
+    msg.photo ||
+      msg.video ||
+      msg.document ||
+      msg.audio ||
+      msg.voice ||
+      msg.video_note ||
+      msg.animation ||
+      msg.sticker ||
+      msg.contact ||
+      msg.location ||
+      msg.venue ||
+      msg.poll
+  );
+}
+
+function pruneSpamState(now = Date.now()) {
+  if (now - lastSpamStatePruneAt < 30 * 1000) return;
+  lastSpamStatePruneAt = now;
+  for (const [key, arr] of floodState.entries()) {
+    const recent = (arr || []).filter((ts) => now - ts <= FLOOD_WINDOW_MS);
+    if (!recent.length) floodState.delete(key);
+    else floodState.set(key, recent);
+  }
+  for (const [key, row] of duplicateState.entries()) {
+    if (!row || now - Number(row.lastTs || 0) > DUP_WINDOW_MS) duplicateState.delete(key);
+  }
+  for (const [key, until] of newMemberProbationState.entries()) {
+    if (!Number.isFinite(until) || until <= now) newMemberProbationState.delete(key);
+  }
+}
+
+function isFloodViolation(chatId, userId, now = Date.now()) {
+  const key = spamStateKey(chatId, userId);
+  const cur = floodState.get(key) || [];
+  const recent = cur.filter((ts) => now - ts <= FLOOD_WINDOW_MS);
+  recent.push(now);
+  floodState.set(key, recent);
+  return recent.length > FLOOD_MAX_MESSAGES;
+}
+
+function isDuplicateViolation(chatId, userId, rawText, now = Date.now()) {
+  const normalized = normalizeDuplicateText(rawText);
+  if (!normalized || normalized.length < DUP_MIN_LENGTH) return false;
+  const key = spamStateKey(chatId, userId);
+  const cur = duplicateState.get(key);
+  if (!cur || cur.text !== normalized || now - cur.lastTs > DUP_WINDOW_MS) {
+    duplicateState.set(key, { text: normalized, count: 1, lastTs: now });
+    return false;
+  }
+  const next = { text: normalized, count: cur.count + 1, lastTs: now };
+  duplicateState.set(key, next);
+  return next.count >= DUP_REPEAT_LIMIT;
+}
+
+function isUnderNewMemberProbation(chatId, userId, now = Date.now()) {
+  const key = spamStateKey(chatId, userId);
+  const until = newMemberProbationState.get(key);
+  if (!Number.isFinite(until)) return false;
+  if (until <= now) {
+    newMemberProbationState.delete(key);
+    return false;
+  }
+  return true;
+}
+
+export function markNewMemberJoined(chatId, userId) {
+  if (!Number.isFinite(chatId) || !Number.isFinite(userId)) return;
+  if (NEW_MEMBER_PROBATION_MS <= 0) return;
+  newMemberProbationState.set(spamStateKey(chatId, userId), Date.now() + NEW_MEMBER_PROBATION_MS);
+}
+
 // Cache funny prefixes per (chat,user) for 10 minutes to avoid constant DB hits
 const funnyPrefixCache = new Map(); // key `${chatId}:${userId}` -> { until, prefix }
 async function userPrefix(ctx, user, currentViolation) {
@@ -278,11 +399,13 @@ export function securityMiddleware() {
 
     if (await enforceGlobalBlacklist(ctx)) return;
 
-    // Exemption: group admins/owner and bot owner/admins
-    if (await isExempt(ctx)) return next();
+    // Exemption: group admins/owner and bot owner/admins.
+    // Name/username checks should still run for exempt users on new messages.
+    const exemptUser = await isExempt(ctx);
 
     // Rule 2: No edits — delete edited messages (if enabled)
     if (ctx.editedMessage) {
+      if (exemptUser) return next();
       if (await isRuleEnabled('no_edit', ctx.chat.id)) {
         if (await ensureBotCanDelete(ctx)) {
           try {
@@ -314,6 +437,95 @@ export function securityMiddleware() {
         pollText = [q, ...opts].filter(Boolean).join(' \n ');
       } catch {}
     }
+
+  const chatId = ctx.chat?.id;
+  const senderId = ctx.from?.id;
+  const now = Date.now();
+  pruneSpamState(now);
+
+  if (Number.isFinite(chatId) && Number.isFinite(senderId)) {
+    if ((await isRuleEnabled('anti_flood', chatId)) && isFloodViolation(chatId, senderId, now)) {
+      if (await ensureBotCanDelete(ctx)) {
+        try {
+          await ctx.api.deleteMessage(chatId, msg.message_id);
+          let muted = false;
+          if (FLOOD_MUTE_SECONDS > 0) {
+            try {
+              await ctx.api.restrictChatMember(chatId, senderId, {
+                permissions: BLACKLIST_MUTE_PERMISSIONS,
+                until_date: Math.floor(Date.now() / 1000) + FLOOD_MUTE_SECONDS,
+              });
+              muted = true;
+            } catch {}
+          }
+          await notifyAndCleanup(
+            ctx,
+            `⏱️ ${await mentionWithPrefix(ctx, ctx.from, 'anti_flood')} <b>too many messages too quickly</b>. Please slow down.${muted ? ` Muted for ${FLOOD_MUTE_SECONDS}s.` : ''}${await maybeSuffix(ctx, 'anti_flood')}`
+          );
+          await logAction(ctx, {
+            action: muted ? 'restrict_member' : 'delete_message',
+            action_type: 'moderation',
+            violation: 'anti_flood',
+            user: ctx.from,
+            chat: ctx.chat,
+            content: text || (pollText ? `[POLL] ${pollText}` : ''),
+          });
+        } catch (_) {}
+      }
+      return;
+    }
+
+    if ((await isRuleEnabled('anti_duplicate', chatId)) && isDuplicateViolation(chatId, senderId, text || pollText, now)) {
+      if (await ensureBotCanDelete(ctx)) {
+        try {
+          await ctx.api.deleteMessage(chatId, msg.message_id);
+          await notifyAndCleanup(
+            ctx,
+            `🌀 ${await mentionWithPrefix(ctx, ctx.from, 'anti_duplicate')} <b>repeated messages are not allowed</b>.${await maybeSuffix(ctx, 'anti_duplicate')}`
+          );
+          await logAction(ctx, {
+            action: 'delete_message',
+            action_type: 'moderation',
+            violation: 'anti_duplicate',
+            user: ctx.from,
+            chat: ctx.chat,
+            content: text || (pollText ? `[POLL] ${pollText}` : ''),
+          });
+        } catch (_) {}
+      }
+      return;
+    }
+
+    if ((await isRuleEnabled('new_member_probation', chatId)) && isUnderNewMemberProbation(chatId, senderId, now)) {
+      const probationHasLink = entitiesContainLink(entities) || textHasLink(text) || (pollText ? textHasLink(pollText) : false);
+      const probationHasMedia = messageHasMedia(msg);
+      if (probationHasLink || probationHasMedia) {
+        if (await ensureBotCanDelete(ctx)) {
+          try {
+            await ctx.api.deleteMessage(chatId, msg.message_id);
+            const reason = probationHasLink && probationHasMedia
+              ? 'links and media'
+              : probationHasLink
+                ? 'links'
+                : 'media';
+            await notifyAndCleanup(
+              ctx,
+              `🛡️ ${await mentionWithPrefix(ctx, ctx.from, 'new_member_probation')} <b>new-member probation is active</b>. ${escapeHtml(reason)} are temporarily restricted.${await maybeSuffix(ctx, 'new_member_probation')}`
+            );
+            await logAction(ctx, {
+              action: 'delete_message',
+              action_type: 'moderation',
+              violation: 'new_member_probation',
+              user: ctx.from,
+              chat: ctx.chat,
+              content: text || (pollText ? `[POLL] ${pollText}` : '[MEDIA]'),
+            });
+          } catch (_) {}
+        }
+        return;
+      }
+    }
+  }
 
   // AI cross-check helpers
   const aiEnabled = (() => {
@@ -419,6 +631,10 @@ export function securityMiddleware() {
       }
     }
   }
+
+    // Exempt users are still checked for display-name policy above,
+    // but skip all other message-content moderation rules.
+    if (exemptUser) return next();
 
     // Rule 5 (extended): bio moderation (links or explicit content)
     const userId = ctx.from?.id;

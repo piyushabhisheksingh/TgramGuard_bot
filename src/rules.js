@@ -4,6 +4,9 @@ export const RULE_KEYS = [
   'no_links',
   'no_explicit',
   'bio_block',
+  'anti_flood',
+  'anti_duplicate',
+  'new_member_probation',
   'funny_suffix',
 ];
 
@@ -13,6 +16,9 @@ export const DEFAULT_RULES = {
   no_links: true,
   no_explicit: true,
   bio_block: true,
+  anti_flood: true,
+  anti_duplicate: true,
+  new_member_probation: true,
   funny_suffix: true,
 };
 

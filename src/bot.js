@@ -4,7 +4,7 @@ import { run, sequentialize } from '@grammyjs/runner';
 import { autoRetry } from '@grammyjs/auto-retry';
 import throttlerModule from '@grammyjs/transformer-throttler';
 import http from 'node:http';
-import { securityMiddleware } from './middleware/security.js';
+import { securityMiddleware, markNewMemberJoined } from './middleware/security.js';
 import { settingsMiddleware } from './middleware/settings.js';
 import { bootstrapAdminsFromEnv, areCommandsInitialized, markCommandsInitialized, getBlacklistEntry, isRuleEnabled } from './store/settings.js';
 import { logActionPinned, logAction, recordUserPresence, removeChatPresenceUsers } from './logger.js';
@@ -98,6 +98,7 @@ bot.on('message:new_chat_members', async (ctx) => {
     const blockedNotices = [];
     const flaggedNameNotices = [];
     for (const member of candidates) {
+      markNewMemberJoined(ctx.chat.id, member.id);
       const entry = await getBlacklistEntry(member.id);
       if (!entry) {
         const dn = displayName(member);
