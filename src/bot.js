@@ -6,9 +6,10 @@ import throttlerModule from '@grammyjs/transformer-throttler';
 import http from 'node:http';
 import { securityMiddleware } from './middleware/security.js';
 import { settingsMiddleware } from './middleware/settings.js';
-import { bootstrapAdminsFromEnv, areCommandsInitialized, markCommandsInitialized, getBlacklistEntry } from './store/settings.js';
+import { bootstrapAdminsFromEnv, areCommandsInitialized, markCommandsInitialized, getBlacklistEntry, isRuleEnabled } from './store/settings.js';
 import { logActionPinned, logAction, recordUserPresence, removeChatPresenceUsers } from './logger.js';
 import { defaultCommands, adminCommands, ownerPrivateCommands } from './commands/menu.js';
+import { textHasLink, containsExplicit } from './filters.js';
 
 const { apiThrottler } = throttlerModule;
 const token = process.env.BOT_TOKEN;
@@ -81,12 +82,41 @@ bot.on('message:new_chat_members', async (ctx) => {
       const id = u?.id ?? '?';
       return `<a href="tg://user?id=${id}">${esc(String(id))}</a>`;
     }
+    function displayName(u) {
+      return [
+        u?.first_name,
+        u?.last_name,
+        u?.username ? `@${u.username}` : null,
+      ]
+        .filter(Boolean)
+        .join(' ');
+    }
 
+    const checkNameLinks = await isRuleEnabled('no_links', ctx.chat.id);
+    const checkNameExplicit = await isRuleEnabled('no_explicit', ctx.chat.id);
     const allowed = [];
     const blockedNotices = [];
+    const flaggedNameNotices = [];
     for (const member of candidates) {
       const entry = await getBlacklistEntry(member.id);
       if (!entry) {
+        const dn = displayName(member);
+        const hasNameLink = checkNameLinks && dn ? textHasLink(dn) : false;
+        const hasNameExplicit = checkNameExplicit && dn ? containsExplicit(dn) : false;
+        if (hasNameLink || hasNameExplicit) {
+          const reasons = [];
+          if (hasNameLink) reasons.push('link in name/username');
+          if (hasNameExplicit) reasons.push('explicit content in name/username');
+          flaggedNameNotices.push(`• ${mention(member)} flagged: <b>${esc(reasons.join(' and '))}</b>.`);
+          await logAction(ctx, {
+            action: 'name_check_flagged_on_join',
+            action_type: 'security',
+            violation: hasNameLink ? 'name_no_links' : 'name_no_explicit',
+            user: member,
+            chat: ctx.chat,
+            content: dn,
+          });
+        }
         allowed.push(member);
         continue;
       }
@@ -126,6 +156,17 @@ bot.on('message:new_chat_members', async (ctx) => {
 
     if (blockedNotices.length) {
       const notice = ['🚫 <b>Global blacklist enforcement</b>', ...blockedNotices].join('\n');
+      try {
+        await ctx.api.sendMessage(ctx.chat.id, notice, { parse_mode: 'HTML', disable_web_page_preview: true });
+      } catch {}
+    }
+    if (flaggedNameNotices.length) {
+      const notice = [
+        '⚠️ <b>Name/username policy warning</b>',
+        ...flaggedNameNotices,
+        '',
+        'Update your display name/username to avoid moderation actions.',
+      ].join('\n');
       try {
         await ctx.api.sendMessage(ctx.chat.id, notice, { parse_mode: 'HTML', disable_web_page_preview: true });
       } catch {}
