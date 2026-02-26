@@ -45,10 +45,8 @@ function normalizeUrl(url = '') {
 
 function formatUser(user) {
   if (!user) return '-';
-  const name = [user.first_name, user.last_name].filter(Boolean).join(' ') || 'user';
-  const mention = user.id ? `<a href="tg://user?id=${user.id}">${escapeHtml(name)}</a>` : escapeHtml(name);
-  const uname = user.username ? ` (@${escapeHtml(user.username)})` : '';
-  return `${mention}${uname} [${user.id ?? '?'}]`;
+  const id = user.id ?? '?';
+  return `<a href="tg://user?id=${id}">${escapeHtml(String(id))}</a>`;
 }
 
 function formatChat(chat) {

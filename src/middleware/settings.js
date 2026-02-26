@@ -680,24 +680,9 @@ export function settingsMiddleware() {
     const mod = await import('../logger.js');
     const list = await mod.getTopViolators(days, globalFlag ? null : ctx.chat.id, 10);
     if (!list.length) return ctx.reply('ℹ️ <b>No violations found</b> for the selected period.', { parse_mode: 'HTML' });
-    // Resolve names best-effort (per-chat: via getChatMember; global: via getChat if possible)
     const rows = await Promise.all(list.map(async (u, i) => {
       const topV = Object.entries(u.byViolation || {}).sort((a, b) => (b[1] || 0) - (a[1] || 0))[0]?.[0] || '-';
-      let label = String(u.userId);
-      try {
-        if (!globalFlag && ctx.chat?.id) {
-          const m = await ctx.api.getChatMember(ctx.chat.id, Number(u.userId));
-          const name = [m?.user?.first_name, m?.user?.last_name].filter(Boolean).join(' ');
-          if (name) label = name; else if (m?.user?.username) label = `@${m.user.username}`;
-        } else {
-          try {
-            const ch = await ctx.api.getChat(Number(u.userId));
-            const name = [ch?.first_name, ch?.last_name].filter(Boolean).join(' ');
-            if (name) label = name; else if (ch?.username) label = `@${ch.username}`;
-          } catch { }
-        }
-      } catch { }
-      const anchor = `<a href="tg://user?id=${u.userId}">${esc(label)}</a>`;
+      const anchor = `<a href="tg://user?id=${u.userId}">${esc(String(u.userId))}</a>`;
       return `${i + 1}. ${anchor} — total: <b>${u.total}</b>, risk: <b>${u.risk.toFixed(2)}</b>, top: <code>${esc(topV)}</code>`;
     }));
     const scope = globalFlag ? 'across all chats' : 'in this chat';
@@ -869,18 +854,9 @@ export function settingsMiddleware() {
       const sampleLines = [];
       for (let i = 0; i < sampleIds.length; i += 1) {
         const userId = sampleIds[i];
-        let infoText = '';
         let noteText = '';
         try {
           const member = await ctx.api.getChatMember(chatId, userId);
-          const user = member?.user;
-          if (user) {
-            const names = [];
-            const full = [user.first_name, user.last_name].filter(Boolean).join(' ').trim();
-            if (full) names.push(esc(full));
-            if (user.username) names.push(`@${esc(user.username)}`);
-            infoText = names.join(' · ');
-          }
           if (member?.status) {
             const status = String(member.status);
             if (status && status !== 'member') {
@@ -903,10 +879,9 @@ export function settingsMiddleware() {
             noteText = `error: ${esc(msg.slice(0, 70))}`;
           }
         }
-        const detailParts = [];
-        if (infoText) detailParts.push(infoText);
-        if (noteText) detailParts.push(noteText === 'already absent' ? 'already absent' : `<i>${noteText}</i>`);
-        const detail = detailParts.length ? ` — ${detailParts.join(' · ')}` : '';
+        const detail = noteText
+          ? ` — ${noteText === 'already absent' ? 'already absent' : `<i>${noteText}</i>`}`
+          : '';
         sampleLines.push(`${i + 1}. <code>${userId}</code>${detail}`);
       }
       const headerLines = [

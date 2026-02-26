@@ -2,19 +2,22 @@
   "bot_admin_ids": [
     5809684748,
     6681877397,
-    1632101837
+    5599964068
   ],
   "global_rules": {
     "no_edit": true,
     "max_len": true,
     "no_links": true,
     "no_explicit": true,
-    "bio_block": true
+    "bio_block": true,
+    "funny_suffix": true
   },
   "chat_rules": {},
   "global_limits": {
     "max_len": 300
   },
   "chat_limits": {},
-  "chat_whitelist": {}
+  "chat_whitelist": {},
+  "global_blacklist": {},
+  "commands_initialized": true
 }

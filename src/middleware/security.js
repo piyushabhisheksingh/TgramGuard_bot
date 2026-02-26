@@ -41,9 +41,8 @@ function escapeHtml(s = '') {
 }
 
 function mentionHTML(user) {
-  const name = [user?.first_name, user?.last_name].filter(Boolean).join(' ') || 'user';
   const id = user?.id ?? '?';
-  return `<a href="tg://user?id=${id}">${escapeHtml(name)} [${id}]</a>`;
+  return `<a href="tg://user?id=${id}">${escapeHtml(String(id))}</a>`;
 }
 
 const BLACKLIST_MUTE_PERMISSIONS = {
@@ -91,9 +90,7 @@ async function mentionWithPrefix(ctx, user, currentViolation) {
 async function mentionPlainWithPrefix(ctx, user, currentViolation) {
   const pref = await userPrefix(ctx, user, currentViolation);
   const id = user?.id ?? '?';
-  const name = [user?.first_name, user?.last_name].filter(Boolean).join(' ') || 'user';
-  const escName = escapeHtml(name);
-  return `${pref}${escName} [${id}]`;
+  return `${pref}<code>${escapeHtml(String(id))}</code>`;
 }
 
 // Conditional funny suffix based on settings: can be toggled globally or per chat

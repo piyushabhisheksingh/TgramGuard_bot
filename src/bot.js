@@ -78,8 +78,8 @@ bot.on('message:new_chat_members', async (ctx) => {
       return String(s).replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
     }
     function mention(u) {
-      const name = [u?.first_name, u?.last_name].filter(Boolean).join(' ') || 'user';
-      return `<a href="tg://user?id=${u.id}">${esc(name)}</a>`;
+      const id = u?.id ?? '?';
+      return `<a href="tg://user?id=${id}">${esc(String(id))}</a>`;
     }
 
     const allowed = [];
