@@ -42,7 +42,7 @@ function escapeHtml(s = '') {
 
 function mentionHTML(user) {
   const id = user?.id ?? '?';
-  return `<a href="tg://user?id=${id}">${escapeHtml(String(id))}</a>`;
+  return `<code>${escapeHtml(String(id))}</code>`;
 }
 
 const BLACKLIST_MUTE_PERMISSIONS = {
