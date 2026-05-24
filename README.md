@@ -111,6 +111,9 @@ Limits
 - `EXPLICIT_STRICT`: when `true`/`1`/`yes`/`on`, enables aggressive generated phrase patterns (family + explicit nouns) to catch more variants
 - `NOTIFY_CLEANUP`: when `true`/`1`/`yes`/`on`, auto-deletes moderation notices after a delay; otherwise messages persist (default off)
 - `NOTIFY_CLEANUP_SECONDS`: delay in seconds before deleting notices (defaults to 8 if cleanup is enabled)
+- `SETTINGS_CACHE_TTL_MS`: global settings cache TTL in milliseconds (default 5000; set 0 to disable)
+- `CHAT_SETTINGS_TTL_MS`: per-chat Supabase settings cache TTL in milliseconds (default 5000; set 0 to disable)
+- `BIO_CACHE_TTL_MS`: user bio moderation cache TTL in milliseconds (default 5000; set 0 to disable)
 
 Optional Supabase (for shared/multi-instance persistence):
 - `SUPABASE_URL`: Supabase project URL

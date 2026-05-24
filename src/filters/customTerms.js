@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { getSupabase } from '../store/supabase.js';
+import { replaceHomoglyphsAndLeetspeak } from '../filters.js';
 
 function escapeRegex(s = '') {
   return String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -59,6 +60,8 @@ export const customExplicitTerms = [
 // Keep a lightweight normalization aligned with filters.normalizeForExplicit
 function normalizeLite(s = '') {
   let t = String(s).toLowerCase();
+  // Apply homoglyph and leetspeak replacements for 100% matching
+  t = replaceHomoglyphsAndLeetspeak(t);
   try { t = t.normalize('NFKD').replace(/\p{M}+/gu, ''); } catch {}
   // Strip punctuation/symbols but keep whitespace aligned with containsExplicit normalization
   t = t.replace(/[._\-|*`'"~^+\=\/\\()\[\]{}:,;<>]+/g, ' ');

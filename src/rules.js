@@ -7,7 +7,6 @@ export const RULE_KEYS = [
   'anti_flood',
   'anti_duplicate',
   'new_member_probation',
-  'funny_suffix',
 ];
 
 export const DEFAULT_RULES = {
@@ -19,7 +18,6 @@ export const DEFAULT_RULES = {
   anti_flood: true,
   anti_duplicate: true,
   new_member_probation: true,
-  funny_suffix: true,
 };
 
 export const DEFAULT_LIMITS = {

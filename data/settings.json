@@ -9,8 +9,7 @@
     "max_len": true,
     "no_links": true,
     "no_explicit": true,
-    "bio_block": true,
-    "funny_suffix": true
+    "bio_block": true
   },
   "chat_rules": {},
   "global_limits": {

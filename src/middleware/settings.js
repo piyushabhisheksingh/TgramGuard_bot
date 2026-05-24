@@ -25,6 +25,8 @@ import { consumeReview } from '../logger.js';
 import { addSafeTerms, addExplicitTerms } from '../filters/customTerms.js';
 import { defaultCommands, adminCommands, ownerPrivateCommands } from '../commands/menu.js';
 import { addExplicitRuntime, containsExplicit } from '../filters.js';
+import { BOT_OWNER_ID, MUTE_PERMISSIONS } from '../config.js';
+import { isBotPrivileged } from '../services/auth.js';
 
 const groupKickAbortState = new Map(); // chatId -> { abort, startedAt, startedBy, abortedBy, abortedAt }
 
@@ -178,20 +180,13 @@ async function isChatAdminWithBan(ctx, userId) {
 
 function isBotOwner(ctx) {
   const userId = ctx.from?.id;
-  const ownerId = Number(process.env.BOT_OWNER_ID || NaN);
-  return Number.isFinite(ownerId) && userId === ownerId;
+  return Number.isFinite(BOT_OWNER_ID) && userId === BOT_OWNER_ID;
 }
 
 async function isBotAdminOrOwner(ctx) {
   const userId = ctx.from?.id;
   if (!userId) return false;
-  if (isBotOwner(ctx)) return true;
-  try {
-    const s = await getSettings();
-    return s.bot_admin_ids.includes(userId);
-  } catch {
-    return false;
-  }
+  return isBotPrivileged(userId);
 }
 
 function formatRulesStatus(globalRules, chatRules, effective, limits) {
@@ -241,22 +236,6 @@ export function settingsMiddleware() {
     return sent;
   }
 
-  const BLACKLIST_MUTE_PERMS = {
-    can_send_messages: false,
-    can_send_audios: false,
-    can_send_documents: false,
-    can_send_photos: false,
-    can_send_videos: false,
-    can_send_video_notes: false,
-    can_send_voice_notes: false,
-    can_send_polls: false,
-    can_send_other_messages: false,
-    can_add_web_page_previews: false,
-    can_change_info: false,
-    can_invite_users: false,
-    can_pin_messages: false,
-  };
-
   const BL_DELAY_MIN = Math.max(0, Number(process.env.BLACKLIST_ENFORCE_DELAY_MIN_MS || 0));
   const BL_DELAY_MAX_RAW = Number(process.env.BLACKLIST_ENFORCE_DELAY_MAX_MS || 0);
   const BL_DELAY_MAX = Number.isFinite(BL_DELAY_MAX_RAW) && BL_DELAY_MAX_RAW >= BL_DELAY_MIN ? BL_DELAY_MAX_RAW : BL_DELAY_MIN;
@@ -299,7 +278,7 @@ export function settingsMiddleware() {
       } catch {}
       try {
         if (action === 'mute') {
-          await ctx.api.restrictChatMember(chatId, userId, { permissions: BLACKLIST_MUTE_PERMS });
+          await ctx.api.restrictChatMember(chatId, userId, { permissions: MUTE_PERMISSIONS });
           details.applied.push({ chatId, title: chatMeta?.title, mode: 'mute' });
         } else {
           await ctx.api.banChatMember(chatId, userId, { until_date: Math.floor(Date.now() / 1000) + 60 });

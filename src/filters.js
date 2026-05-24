@@ -36,7 +36,9 @@ export function containsExplicit(text = "") {
   // Quick precheck: if nothing resembles explicit even before stripping, bail out
   const preHit =
     hasExplicitPatternOfMinimumLength(normalized, explicitTermsLoose) ||
+    hasExplicitPatternOfMinimumLength(foldRepeatedLetters(normalized), explicitTermsLoose) ||
     hasExplicitPatternOfMinimumLength(normalized, runtimeExplicitLoose) ||
+    hasExplicitPatternOfMinimumLength(foldRepeatedLetters(normalized), runtimeExplicitLoose) ||
     // Optional: token-based profanity check via `allprofanity` package if installed
     hasProfanityToken(text);
   if (!preHit) return false;
@@ -44,7 +46,9 @@ export function containsExplicit(text = "") {
   const stripped = stripSafeSegments(normalized);
   const hitLoose =
     hasExplicitPatternOfMinimumLength(stripped, explicitTermsLoose) ||
-    hasExplicitPatternOfMinimumLength(stripped, runtimeExplicitLoose);
+    hasExplicitPatternOfMinimumLength(foldRepeatedLetters(stripped), explicitTermsLoose) ||
+    hasExplicitPatternOfMinimumLength(stripped, runtimeExplicitLoose) ||
+    hasExplicitPatternOfMinimumLength(foldRepeatedLetters(stripped), runtimeExplicitLoose);
   if (!hitLoose) return false;
   // Special-case guard: if only 'sex' remains but the raw text contains benign terms like 'sexton' or 'sexagesimal', treat as benign
   try {
@@ -62,6 +66,8 @@ export function overCharLimit(text = "", limit = 300) {
 }
 
 // --- Obfuscation handling ---
+// Only repeated letters are folded. Do not translate leetspeak or homoglyph
+// replacements such as 3 -> e, @ -> a, 0 -> o, or Cyrillic/Greek letters.
 const MIN_EXPLICIT_TOKEN_LEN = 3;
 
 // Build a loosened variant of patterns (no word boundaries) for normalized scan
@@ -110,9 +116,43 @@ export function addExplicitRuntime(terms = []) {
   return added;
 }
 
+// --- Digit/Symbol and Homoglyph Replacement Maps ---
+// Maps for converting leetspeak digits and symbols to their letter equivalents
+const DIGIT_SYMBOL_MAP = {
+  '0': 'o', '1': 'i', '3': 'e', '4': 'a', '5': 's', '7': 't', '8': 'b', '9': 'g',
+  '@': 'a', '$': 's', '!': 'i', '|': 'i', '%': 's', '^': 'a', '&': 'and', '+': 't'
+};
+
+// Homoglyph map: Cyrillic, Greek, and other Unicode characters that visually resemble Latin letters
+const HOMOGLYPH_MAP = {
+  // Cyrillic lookalikes
+  'а': 'a', 'е': 'e', 'о': 'o', 'р': 'p', 'с': 'c', 'т': 't', 'у': 'y', 'х': 'x', 'н': 'h', 'м': 'm', 'в': 'b', 'к': 'k', 'ё': 'e',
+  // Greek lookalikes
+  'α': 'a', 'β': 'b', 'γ': 'g', 'δ': 'd', 'ε': 'e', 'ζ': 'z', 'η': 'h', 'θ': 'o', 'ι': 'i', 'κ': 'k', 'ν': 'v', 'ο': 'o', 'ρ': 'p', 'τ': 't', 'υ': 'y', 'φ': 'o', 'χ': 'x', 'ψ': 'y', 'ω': 'w',
+  // Additional script lookalikes
+  'ѐ': 'e', 'ё': 'e', 'і': 'i', 'ї': 'i', 'ў': 'u',
+  // Full-width variants
+  'ａ': 'a', 'ｂ': 'b', 'ｃ': 'c', 'ｄ': 'd', 'ｅ': 'e', 'ｆ': 'f', 'ｇ': 'g', 'ｈ': 'h', 'ｉ': 'i', 'ｊ': 'j', 'ｋ': 'k', 'ｌ': 'l', 'ｍ': 'm', 'ｎ': 'n', 'ｏ': 'o', 'ｐ': 'p', 'ｑ': 'q', 'ｒ': 'r', 'ｓ': 's', 'ｔ': 't', 'ｕ': 'u', 'ｖ': 'v', 'ｗ': 'w', 'ｘ': 'x', 'ｙ': 'y', 'ｚ': 'z'
+};
+
+export function replaceHomoglyphsAndLeetspeak(input = '') {
+  let s = String(input);
+  // Replace homoglyphs with their Latin equivalents
+  for (const [source, target] of Object.entries(HOMOGLYPH_MAP)) {
+    s = s.split(source).join(target);
+  }
+  // Replace digits and symbols with their letter equivalents
+  for (const [source, target] of Object.entries(DIGIT_SYMBOL_MAP)) {
+    s = s.split(source).join(target);
+  }
+  return s;
+}
+
 function normalizeForExplicit(input = '') {
   // Lowercase
   let s = String(input).toLowerCase();
+  // Replace digits, symbols, and homoglyphs with Latin letters for 100% matching
+  s = replaceHomoglyphsAndLeetspeak(s);
   // Normalize compatibility forms (fullwidth, circled letters, etc.)
   try { s = s.normalize('NFKC'); } catch {}
   // Remove zero-width, joiner, and soft hyphen characters
@@ -121,22 +161,6 @@ function normalizeForExplicit(input = '') {
   try {
     s = s.normalize('NFKD').replace(/\p{M}+/gu, '');
   } catch (_) {}
-  // Leetspeak substitutions and homoglyphs
-  const map = {
-    '0': 'o', '1': 'i', '!': 'i', '3': 'e', '4': 'a', '@': 'a', '$': 's', '5': 's', '7': 't', '8': 'b', '9': 'g', 'µ': 'u',
-    // Cyrillic → Latin
-    'а': 'a', 'е': 'e', 'о': 'o', 'р': 'p', 'с': 's', 'х': 'x', 'у': 'y', 'і': 'i', 'ї': 'i', 'ј': 'j',
-    // Greek → Latin (lowercase)
-    'α': 'a', 'β': 'b', 'γ': 'g', 'δ': 'd', 'ε': 'e', 'ζ': 'z', 'η': 'n', 'ι': 'i', 'κ': 'k', 'λ': 'l', 'μ': 'm', 'ν': 'n',
-    'ο': 'o', 'π': 'p', 'ρ': 'p', 'σ': 's', 'ς': 's', 'τ': 't', 'υ': 'u', 'φ': 'f', 'χ': 'x', 'ψ': 'y', 'ω': 'w',
-    // Arabic-Indic digits → ASCII
-    '٠':'0','١':'1','٢':'2','٣':'3','٤':'4','٥':'5','٦':'6','٧':'7','٨':'8','٩':'9',
-    // Devanagari digits → ASCII
-    '०':'0','१':'1','२':'2','३':'3','४':'4','५':'5','६':'6','७':'7','८':'8','९':'9',
-  };
-  s = s.replace(/[01!34@\$5789µаеорсхуіїјαβγδεζηικλμνξοπρσςτυφχψω٠-٩०-९]/g, (ch) => map[ch] || ch);
-  // Transliterate Devanagari → Latin (rough mapping) to catch mixed-script abuse
-  s = transliterateDevanagari(s);
   // Remove punctuation and symbols but keep whitespace so we don't treat spacing as obfuscation
   try {
     s = s.replace(/[\p{P}\p{S}]+/gu, ' ');
@@ -146,9 +170,13 @@ function normalizeForExplicit(input = '') {
   }
   // Collapse excessive whitespace for stability while preserving intentional spaces
   s = s.replace(/\s+/g, ' ').trim();
-  // Collapse repeated characters (3+ → 2) to catch exxxtreme repeats
+  // Collapse repeated characters (3+ → 2) for stable safelist matching.
   s = s.replace(/([a-z\u0900-\u097F])\1{2,}/g, '$1$1');
   return s;
+}
+
+function foldRepeatedLetters(value = '') {
+  return String(value).replace(/([a-z\u0900-\u097F])\1+/g, '$1');
 }
 
 function normalizedTokenLength(value = '') {
@@ -193,27 +221,6 @@ function stripSafeSegments(normalized = '') {
   return s;
 }
 
-// Basic Devanagari → Latin transliteration (sufficient for abuse words)
-function transliterateDevanagari(s = '') {
-  const m = new Map(Object.entries({
-    'अ':'a','आ':'aa','इ':'i','ई':'ii','उ':'u','ऊ':'uu','ए':'e','ऐ':'ai','ओ':'o','औ':'au','ऋ':'ri',
-    'ा':'aa','ि':'i','ी':'ii','ु':'u','ू':'uu','े':'e','ै':'ai','ो':'o','ौ':'au','ं':'n','ँ':'n','ः':'h','्':'',
-    'क':'k','ख':'kh','ग':'g','घ':'gh','ङ':'n','च':'ch','छ':'chh','ज':'j','झ':'jh','ञ':'n','ट':'t','ठ':'th','ड':'d','ढ':'dh','ण':'n',
-    'त':'t','थ':'th','द':'d','ध':'dh','न':'n','प':'p','फ':'ph','ब':'b','भ':'bh','म':'m','य':'y','र':'r','ल':'l','व':'v','श':'sh','ष':'sh','स':'s','ह':'h',
-    'क़':'q','ख़':'kh','ग़':'g','ज़':'z','ड़':'d','ढ़':'dh','फ़':'f','य़':'y',
-  }));
-  let out = '';
-  for (const ch of s) {
-    const cp = ch.codePointAt(0) || 0;
-    if (cp >= 0x0900 && cp <= 0x097F) {
-      out += m.get(ch) ?? '';
-    } else {
-      out += ch;
-    }
-  }
-  return out;
-}
-
 // --- Optional profanity list from `allprofanity` (token-based) ---
 let profanitySet = null; // Set<string>
 
@@ -250,9 +257,10 @@ function loadAllProfanitySet() {
 function hasProfanityToken(text = '') {
   const set = loadAllProfanitySet();
   if (!set) return false;
+  // Apply homoglyph and leetspeak replacements before tokenizing
+  let cleaned = replaceHomoglyphsAndLeetspeak(String(text).toLowerCase());
   // Ignore very short English tokens (<=2 chars) to avoid false positives
-  const tokens = String(text)
-    .toLowerCase()
+  const tokens = cleaned
     .split(/[^a-z]+/)
     .filter((t) => t && t.length >= 3);
   for (const t of tokens) if (set.has(t)) return true;

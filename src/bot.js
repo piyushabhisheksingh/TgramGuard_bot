@@ -6,10 +6,12 @@ import throttlerModule from '@grammyjs/transformer-throttler';
 import http from 'node:http';
 import { securityMiddleware, markNewMemberJoined } from './middleware/security.js';
 import { settingsMiddleware } from './middleware/settings.js';
-import { bootstrapAdminsFromEnv, areCommandsInitialized, markCommandsInitialized, getBlacklistEntry, isRuleEnabled } from './store/settings.js';
+import { bootstrapAdminsFromEnv, areCommandsInitialized, markCommandsInitialized, getBlacklistEntry, getEffectiveRules } from './store/settings.js';
 import { logActionPinned, logAction, recordUserPresence, removeChatPresenceUsers } from './logger.js';
 import { defaultCommands, adminCommands, ownerPrivateCommands } from './commands/menu.js';
 import { textHasLink, containsExplicit } from './filters.js';
+import { BOT_ADMIN_IDS, BOT_OWNER_ID, MUTE_PERMISSIONS, numberEnv } from './config.js';
+import { displayName, escapeHtml, isGroupChat, linkMention, sendHtml } from './services/telegram.js';
 
 const { apiThrottler } = throttlerModule;
 const token = process.env.BOT_TOKEN;
@@ -19,22 +21,6 @@ if (!token) {
 }
 
 const bot = new Bot(token);
-
-const BLACKLIST_MUTE_PERMISSIONS = {
-  can_send_messages: false,
-  can_send_audios: false,
-  can_send_documents: false,
-  can_send_photos: false,
-  can_send_videos: false,
-  can_send_video_notes: false,
-  can_send_voice_notes: false,
-  can_send_polls: false,
-  can_send_other_messages: false,
-  can_add_web_page_previews: false,
-  can_change_info: false,
-  can_invite_users: false,
-  can_pin_messages: false,
-};
 
 // Reliability: auto-retry transient network errors and 429s with backoff
 bot.api.config.use(autoRetry());
@@ -67,33 +53,16 @@ bot.on('edited_message', recordUserPresence);
 // Welcome new members with a short intro and rules
 bot.on('message:new_chat_members', async (ctx) => {
   try {
-    const chatType = ctx.chat?.type;
-    if (!(chatType === 'group' || chatType === 'supergroup')) return;
+    if (!isGroupChat(ctx)) return;
     const meId = ctx.me?.id;
     const members = ctx.msg?.new_chat_members || [];
     // Filter out bots and the bot itself
     const candidates = members.filter((m) => !m.is_bot && (!meId || m.id !== meId));
     if (!candidates.length) return;
 
-    function esc(s = '') {
-      return String(s).replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
-    }
-    function mention(u) {
-      const id = u?.id ?? '?';
-      return `<a href="tg://user?id=${id}">${esc(String(id))}</a>`;
-    }
-    function displayName(u) {
-      return [
-        u?.first_name,
-        u?.last_name,
-        u?.username ? `@${u.username}` : null,
-      ]
-        .filter(Boolean)
-        .join(' ');
-    }
-
-    const checkNameLinks = await isRuleEnabled('no_links', ctx.chat.id);
-    const checkNameExplicit = await isRuleEnabled('no_explicit', ctx.chat.id);
+    const rules = await getEffectiveRules(ctx.chat.id);
+    const checkNameLinks = rules.no_links;
+    const checkNameExplicit = rules.no_explicit;
     const allowed = [];
     const blockedNotices = [];
     const flaggedNameNotices = [];
@@ -108,7 +77,7 @@ bot.on('message:new_chat_members', async (ctx) => {
           const reasons = [];
           if (hasNameLink) reasons.push('link in name/username');
           if (hasNameExplicit) reasons.push('explicit content in name/username');
-          flaggedNameNotices.push(`• ${mention(member)} flagged: <b>${esc(reasons.join(' and '))}</b>.`);
+          flaggedNameNotices.push(`• ${linkMention(member)} flagged: <b>${escapeHtml(reasons.join(' and '))}</b>.`);
           await logAction(ctx, {
             action: 'name_check_flagged_on_join',
             action_type: 'security',
@@ -123,16 +92,16 @@ bot.on('message:new_chat_members', async (ctx) => {
       }
       const action = entry.action === 'mute' ? 'mute' : 'kick';
       const reason = entry.reason ? entry.reason.slice(0, 180) : '';
-      const reasonHtml = reason ? ` Reason: <i>${esc(reason)}</i>` : '';
+      const reasonHtml = reason ? ` Reason: <i>${escapeHtml(reason)}</i>` : '';
       try {
         if (action === 'mute') {
-          await ctx.api.restrictChatMember(ctx.chat.id, member.id, { permissions: BLACKLIST_MUTE_PERMISSIONS });
+          await ctx.api.restrictChatMember(ctx.chat.id, member.id, { permissions: MUTE_PERMISSIONS });
         } else {
           await ctx.api.banChatMember(ctx.chat.id, member.id, { until_date: Math.floor(Date.now() / 1000) + 60 });
           try { await ctx.api.unbanChatMember(ctx.chat.id, member.id); } catch {}
           try { await removeChatPresenceUsers(ctx.chat.id, [member.id]); } catch {}
         }
-        blockedNotices.push(`• ${mention(member)} ${action === 'mute' ? 'muted' : 'removed'} by global blacklist.${reasonHtml}`);
+        blockedNotices.push(`• ${linkMention(member)} ${action === 'mute' ? 'muted' : 'removed'} by global blacklist.${reasonHtml}`);
         await logAction(ctx, {
           action: action === 'mute' ? 'global_blacklist_mute' : 'global_blacklist_kick',
           action_type: 'security',
@@ -158,7 +127,7 @@ bot.on('message:new_chat_members', async (ctx) => {
     if (blockedNotices.length) {
       const notice = ['🚫 <b>Global blacklist enforcement</b>', ...blockedNotices].join('\n');
       try {
-        await ctx.api.sendMessage(ctx.chat.id, notice, { parse_mode: 'HTML', disable_web_page_preview: true });
+        await sendHtml(ctx, ctx.chat.id, notice);
       } catch {}
     }
     if (flaggedNameNotices.length) {
@@ -169,23 +138,23 @@ bot.on('message:new_chat_members', async (ctx) => {
         'Update your display name/username to avoid moderation actions.',
       ].join('\n');
       try {
-        await ctx.api.sendMessage(ctx.chat.id, notice, { parse_mode: 'HTML', disable_web_page_preview: true });
+        await sendHtml(ctx, ctx.chat.id, notice);
       } catch {}
     }
 
     if (!allowed.length) return;
 
-    const names = allowed.map(mention).join(', ');
-    const title = esc(ctx.chat?.title || 'this group');
-    const rules = [
+    const names = allowed.map(linkMention).join(', ');
+    const title = escapeHtml(ctx.chat?.title || 'this group');
+    const welcomeRules = [
       '• No links',
       '• No explicit content',
       '• Keep it concise, be respectful',
       '• No edits to messages',
     ].join('\n');
 
-    const msg = `👋 Welcome ${names} to <b>${title}</b>!\n\nPlease follow the rules:\n${rules}\n\nUse /settings for options.`;
-    await ctx.reply(msg, { parse_mode: 'HTML', disable_web_page_preview: true });
+    const msg = `👋 Welcome ${names} to <b>${title}</b>!\n\nPlease follow the rules:\n${welcomeRules}\n\nUse /settings for options.`;
+    await sendHtml(ctx, ctx.chat.id, msg);
   } catch (_) {}
 });
 
@@ -248,15 +217,7 @@ bot.on('my_chat_member', async (ctx) => {
 });
 
 // Bootstrap admins from env
-const ENV_BOT_OWNER_ID = Number(process.env.BOT_OWNER_ID || NaN);
-const ENV_BOT_ADMIN_IDS = new Set(
-  (process.env.BOT_ADMIN_IDS || '')
-    .split(/[\s,]+/)
-    .filter(Boolean)
-    .map((v) => Number(v))
-    .filter((n) => Number.isFinite(n))
-);
-await bootstrapAdminsFromEnv(ENV_BOT_OWNER_ID, ENV_BOT_ADMIN_IDS);
+await bootstrapAdminsFromEnv(BOT_OWNER_ID, BOT_ADMIN_IDS);
 
 // Global error handler
 bot.catch((err) => {
@@ -301,7 +262,7 @@ const USE_WEBHOOK = Boolean(process.env.WEBHOOK_URL);
 // Kick off first-run command setup (best-effort)
 ensureBotCommands();
 if (USE_WEBHOOK) {
-  const PORT = Number(process.env.PORT || 3000);
+  const PORT = numberEnv('PORT', 3000, { min: 1, integer: true });
   const SECRET = process.env.WEBHOOK_SECRET;
   const url = process.env.WEBHOOK_URL;
   // Set webhook and start minimal HTTP server
@@ -322,7 +283,7 @@ if (USE_WEBHOOK) {
     process.once('SIGTERM', shutdown);
   } catch (e) {
     console.error('Failed to set webhook, falling back to runner.', e);
-    const concurrency = Number(process.env.RUNNER_CONCURRENCY || 100);
+    const concurrency = numberEnv('RUNNER_CONCURRENCY', 100, { min: 1, integer: true });
     const runner = run(bot, { fetch: { allowed_updates: allowedUpdates }, runner: { concurrency } });
     console.log('Runner started (fallback).');
     process.once('SIGINT', () => { runner.stop(); });
@@ -330,7 +291,7 @@ if (USE_WEBHOOK) {
   }
 } else {
   // High-load long polling with concurrency
-  const concurrency = Number(process.env.RUNNER_CONCURRENCY || 100);
+  const concurrency = numberEnv('RUNNER_CONCURRENCY', 100, { min: 1, integer: true });
   const runner = run(bot, { fetch: { allowed_updates: allowedUpdates }, runner: { concurrency } });
   console.log('Runner started. Listening for updates...');
   // Graceful shutdown

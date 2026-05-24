@@ -4,10 +4,28 @@ import {
   containsExplicit,
   overCharLimit,
 } from '../filters.js';
-import { isRuleEnabled, getSettings, getEffectiveMaxLen, isUserWhitelisted, getBlacklistEntry } from '../store/settings.js';
+import { getEffectiveRules, getEffectiveMaxLen, getBlacklistEntry } from '../store/settings.js';
 import { logAction, getUserRiskSummary, buildFunnyPrefix, removeChatPresenceUsers } from '../logger.js';
-import { classifyText as aiClassifyText, classifyLinks as aiClassifyLinks } from '../ai/provider_openai.js';
-import { addSafeTerms } from '../filters/customTerms.js';
+import { MUTE_PERMISSIONS } from '../config.js';
+import { isBotPrivileged, isExempt } from '../services/auth.js';
+import {
+  FLOOD_MUTE_SECONDS,
+  isDuplicateViolation,
+  isFloodViolation,
+  isUnderNewMemberProbation,
+  markNewMemberJoined,
+  pruneSpamState,
+} from '../services/spamState.js';
+import {
+  codeMention,
+  displayName,
+  ensureBotCanDelete,
+  escapeHtml,
+  isGroupChat,
+  notifyAndCleanup,
+} from '../services/telegram.js';
+
+export { markNewMemberJoined };
 
 // Cache for user bio moderation status to reduce API calls.
 // Entries expire automatically so users are re-checked after updating their bio.
@@ -16,98 +34,7 @@ const bioModerationCache = new Map();
 const BIO_CACHE_TTL_MS_RAW = Number(process.env.BIO_CACHE_TTL_MS);
 const BIO_CACHE_TTL_MS = Number.isFinite(BIO_CACHE_TTL_MS_RAW)
   ? Math.max(0, BIO_CACHE_TTL_MS_RAW)
-  : 5 * 60 * 1000; // default 5 minutes
-
-// Cache for chat admin status lookups with TTL
-// Map<`${chatId}:${userId}`, { isAdmin: boolean, until: number }>
-const adminStatusCache = new Map();
-
-// Cache the bot's own permissions per chat to reduce API calls
-// Map<chatId, { until: number, isAdmin: boolean, canDelete: boolean }>
-const botPermsCache = new Map();
-
-// Bot-level privileged users (owner + admins) via env
-const BOT_OWNER_ID = Number(process.env.BOT_OWNER_ID || NaN);
-const BOT_ADMIN_IDS = new Set(
-  (process.env.BOT_ADMIN_IDS || '')
-    .split(/[,\s]+/)
-    .filter(Boolean)
-    .map((v) => Number(v))
-    .filter((n) => Number.isFinite(n))
-);
-
-function escapeHtml(s = '') {
-  return s.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
-}
-
-function mentionHTML(user) {
-  const id = user?.id ?? '?';
-  return `<code>${escapeHtml(String(id))}</code>`;
-}
-
-const BLACKLIST_MUTE_PERMISSIONS = {
-  can_send_messages: false,
-  can_send_audios: false,
-  can_send_documents: false,
-  can_send_photos: false,
-  can_send_videos: false,
-  can_send_video_notes: false,
-  can_send_voice_notes: false,
-  can_send_polls: false,
-  can_send_other_messages: false,
-  can_add_web_page_previews: false,
-  can_change_info: false,
-  can_invite_users: false,
-  can_pin_messages: false,
-};
-
-// Realtime anti-spam / probation state (in-memory)
-const floodState = new Map(); // key -> number[] timestamps (ms)
-const duplicateState = new Map(); // key -> { text: string, count: number, lastTs: number }
-const newMemberProbationState = new Map(); // key -> until timestamp (ms)
-let lastSpamStatePruneAt = 0;
-
-const FLOOD_WINDOW_SEC_RAW = Number(process.env.FLOOD_WINDOW_SECONDS);
-const FLOOD_WINDOW_MS = Number.isFinite(FLOOD_WINDOW_SEC_RAW)
-  ? Math.max(1, FLOOD_WINDOW_SEC_RAW) * 1000
-  : 10 * 1000;
-const FLOOD_MAX_MESSAGES_RAW = Number(process.env.FLOOD_MAX_MESSAGES);
-const FLOOD_MAX_MESSAGES = Number.isFinite(FLOOD_MAX_MESSAGES_RAW)
-  ? Math.max(2, Math.trunc(FLOOD_MAX_MESSAGES_RAW))
-  : 6;
-const FLOOD_MUTE_SECONDS_RAW = Number(process.env.FLOOD_MUTE_SECONDS);
-const FLOOD_MUTE_SECONDS = Number.isFinite(FLOOD_MUTE_SECONDS_RAW)
-  ? Math.max(0, Math.trunc(FLOOD_MUTE_SECONDS_RAW))
-  : 60;
-
-const DUP_WINDOW_SEC_RAW = Number(process.env.DUPLICATE_WINDOW_SECONDS);
-const DUP_WINDOW_MS = Number.isFinite(DUP_WINDOW_SEC_RAW)
-  ? Math.max(1, DUP_WINDOW_SEC_RAW) * 1000
-  : 120 * 1000;
-const DUP_REPEAT_RAW = Number(process.env.DUPLICATE_REPEAT_LIMIT);
-const DUP_REPEAT_LIMIT = Number.isFinite(DUP_REPEAT_RAW)
-  ? Math.max(2, Math.trunc(DUP_REPEAT_RAW))
-  : 3;
-const DUP_MIN_LEN_RAW = Number(process.env.DUPLICATE_MIN_LENGTH);
-const DUP_MIN_LENGTH = Number.isFinite(DUP_MIN_LEN_RAW)
-  ? Math.max(1, Math.trunc(DUP_MIN_LEN_RAW))
-  : 8;
-
-const NEW_MEMBER_PROBATION_MIN_RAW = Number(process.env.NEW_MEMBER_PROBATION_MINUTES);
-const NEW_MEMBER_PROBATION_MS = Number.isFinite(NEW_MEMBER_PROBATION_MIN_RAW)
-  ? Math.max(0, NEW_MEMBER_PROBATION_MIN_RAW) * 60 * 1000
-  : 30 * 60 * 1000;
-
-function spamStateKey(chatId, userId) {
-  return `${chatId}:${userId}`;
-}
-
-function normalizeDuplicateText(text = '') {
-  return String(text || '')
-    .toLowerCase()
-    .replace(/\s+/g, ' ')
-    .trim();
-}
+  : 5 * 1000;
 
 function messageHasMedia(msg = {}) {
   return Boolean(
@@ -126,63 +53,7 @@ function messageHasMedia(msg = {}) {
   );
 }
 
-function pruneSpamState(now = Date.now()) {
-  if (now - lastSpamStatePruneAt < 30 * 1000) return;
-  lastSpamStatePruneAt = now;
-  for (const [key, arr] of floodState.entries()) {
-    const recent = (arr || []).filter((ts) => now - ts <= FLOOD_WINDOW_MS);
-    if (!recent.length) floodState.delete(key);
-    else floodState.set(key, recent);
-  }
-  for (const [key, row] of duplicateState.entries()) {
-    if (!row || now - Number(row.lastTs || 0) > DUP_WINDOW_MS) duplicateState.delete(key);
-  }
-  for (const [key, until] of newMemberProbationState.entries()) {
-    if (!Number.isFinite(until) || until <= now) newMemberProbationState.delete(key);
-  }
-}
-
-function isFloodViolation(chatId, userId, now = Date.now()) {
-  const key = spamStateKey(chatId, userId);
-  const cur = floodState.get(key) || [];
-  const recent = cur.filter((ts) => now - ts <= FLOOD_WINDOW_MS);
-  recent.push(now);
-  floodState.set(key, recent);
-  return recent.length > FLOOD_MAX_MESSAGES;
-}
-
-function isDuplicateViolation(chatId, userId, rawText, now = Date.now()) {
-  const normalized = normalizeDuplicateText(rawText);
-  if (!normalized || normalized.length < DUP_MIN_LENGTH) return false;
-  const key = spamStateKey(chatId, userId);
-  const cur = duplicateState.get(key);
-  if (!cur || cur.text !== normalized || now - cur.lastTs > DUP_WINDOW_MS) {
-    duplicateState.set(key, { text: normalized, count: 1, lastTs: now });
-    return false;
-  }
-  const next = { text: normalized, count: cur.count + 1, lastTs: now };
-  duplicateState.set(key, next);
-  return next.count >= DUP_REPEAT_LIMIT;
-}
-
-function isUnderNewMemberProbation(chatId, userId, now = Date.now()) {
-  const key = spamStateKey(chatId, userId);
-  const until = newMemberProbationState.get(key);
-  if (!Number.isFinite(until)) return false;
-  if (until <= now) {
-    newMemberProbationState.delete(key);
-    return false;
-  }
-  return true;
-}
-
-export function markNewMemberJoined(chatId, userId) {
-  if (!Number.isFinite(chatId) || !Number.isFinite(userId)) return;
-  if (NEW_MEMBER_PROBATION_MS <= 0) return;
-  newMemberProbationState.set(spamStateKey(chatId, userId), Date.now() + NEW_MEMBER_PROBATION_MS);
-}
-
-// Cache funny prefixes per (chat,user) for 10 minutes to avoid constant DB hits
+// Cache funny prefixes briefly so risk labels rehydrate quickly after log changes.
 const funnyPrefixCache = new Map(); // key `${chatId}:${userId}` -> { until, prefix }
 async function userPrefix(ctx, user, currentViolation) {
   const chatId = ctx.chat?.id;
@@ -196,7 +67,7 @@ async function userPrefix(ctx, user, currentViolation) {
     const { label, topViolation } = await getUserRiskSummary(userId, chatId);
     const chosenType = currentViolation || topViolation;
     const prefix = buildFunnyPrefix(label, chosenType);
-    funnyPrefixCache.set(key, { until: now + 10 * 60 * 1000, prefix });
+    funnyPrefixCache.set(key, { until: now + 5 * 1000, prefix });
     return prefix;
   } catch {
     return '';
@@ -205,56 +76,13 @@ async function userPrefix(ctx, user, currentViolation) {
 
 async function mentionWithPrefix(ctx, user, currentViolation) {
   const pref = await userPrefix(ctx, user, currentViolation);
-  return `${pref}${mentionHTML(user)}`;
+  return `${pref}${codeMention(user)}`;
 }
 
 async function mentionPlainWithPrefix(ctx, user, currentViolation) {
   const pref = await userPrefix(ctx, user, currentViolation);
   const id = user?.id ?? '?';
   return `${pref}<code>${escapeHtml(String(id))}</code>`;
-}
-
-// Conditional funny suffix based on settings: can be toggled globally or per chat
-async function maybeSuffix(ctx, violation = 'default') {
-  return '';
-}
-
-async function notifyAndCleanup(ctx, text, seconds = 8) {
-  const chatId = ctx.chat?.id;
-  if (!chatId) return;
-  const replyTo = ctx.msg?.message_id;
-  const boolFromEnv = (v) => {
-    if (v == null) return false;
-    const s = String(v).toLowerCase();
-    return s === '1' || s === 'true' || s === 'yes' || s === 'on';
-  };
-  const doCleanup = boolFromEnv(process.env.NOTIFY_CLEANUP);
-  const cleanupSeconds = Number(process.env.NOTIFY_CLEANUP_SECONDS || seconds);
-  const delayMs = Number.isFinite(cleanupSeconds) ? Math.max(1, cleanupSeconds) * 1000 : seconds * 1000;
-  try {
-    const sent = await ctx.api.sendMessage(chatId, text, {
-      reply_to_message_id: replyTo,
-      parse_mode: 'HTML',
-      disable_web_page_preview: true,
-    });
-    if (doCleanup) {
-      setTimeout(() => {
-        ctx.api.deleteMessage(chatId, sent.message_id).catch(() => {});
-      }, delayMs);
-    }
-  } catch (_) {
-    try {
-      const sent = await ctx.api.sendMessage(chatId, text, {
-        parse_mode: 'HTML',
-        disable_web_page_preview: true,
-      });
-      if (doCleanup) {
-        setTimeout(() => {
-          ctx.api.deleteMessage(chatId, sent.message_id).catch(() => {});
-        }, delayMs);
-      }
-    } catch (_) {}
-  }
 }
 
 async function enforceGlobalBlacklist(ctx) {
@@ -274,7 +102,7 @@ async function enforceGlobalBlacklist(ctx) {
   let success = false;
   try {
     if (action === 'mute') {
-      await ctx.api.restrictChatMember(chatId, userId, { permissions: BLACKLIST_MUTE_PERMISSIONS });
+      await ctx.api.restrictChatMember(chatId, userId, { permissions: MUTE_PERMISSIONS });
       success = true;
     } else {
       await ctx.api.banChatMember(chatId, userId, { until_date: Math.floor(Date.now() / 1000) + 60 });
@@ -310,44 +138,6 @@ async function enforceGlobalBlacklist(ctx) {
     });
   }
   return true;
-}
-
-async function getBotPermissions(ctx) {
-  const chatId = ctx.chat?.id;
-  if (!chatId) return { isAdmin: false, canDelete: false };
-  const now = Date.now();
-  const cached = botPermsCache.get(chatId);
-  if (cached && cached.until > now) return { isAdmin: cached.isAdmin, canDelete: cached.canDelete };
-  try {
-    const meId = ctx.me?.id;
-    const member = meId ? await ctx.api.getChatMember(chatId, meId) : null;
-    const isAdmin = member?.status === 'administrator' || member?.status === 'creator';
-    const canDelete = Boolean(member?.can_delete_messages || member?.status === 'creator');
-    botPermsCache.set(chatId, { until: now + 60 * 1000, isAdmin, canDelete });
-    return { isAdmin, canDelete };
-  } catch (_) {
-    botPermsCache.set(chatId, { until: now + 30 * 1000, isAdmin: false, canDelete: false });
-    return { isAdmin: false, canDelete: false };
-  }
-}
-
-const lastPermWarn = new Map(); // Map<chatId, number>
-async function ensureBotCanDelete(ctx) {
-  const chatId = ctx.chat?.id;
-  if (!chatId) return false;
-  const { canDelete } = await getBotPermissions(ctx);
-  if (canDelete) return true;
-  const now = Date.now();
-  const last = lastPermWarn.get(chatId) || 0;
-  if (now - last > 10 * 60 * 1000) {
-    lastPermWarn.set(chatId, now);
-    await notifyAndCleanup(
-      ctx,
-      '⚠️ <b>Missing permission:</b> I need admin permission <b>Delete messages</b> to enforce group rules. Please promote the bot and enable this permission.',
-      15
-    );
-  }
-  return false;
 }
 
 function readBioCache(userId) {
@@ -394,10 +184,10 @@ async function checkUserBioStatus(ctx, userId) {
 
 export function securityMiddleware() {
   return async (ctx, next) => {
-    const type = ctx.chat?.type;
-    if (!(type === 'group' || type === 'supergroup')) return next();
+    if (!isGroupChat(ctx)) return next();
 
     if (await enforceGlobalBlacklist(ctx)) return;
+    const rules = await getEffectiveRules(ctx.chat.id);
 
     // Exemption: group admins/owner and bot owner/admins.
     // Name/username checks should still run for exempt users on new messages.
@@ -406,13 +196,13 @@ export function securityMiddleware() {
     // Rule 2: No edits — delete edited messages (if enabled)
     if (ctx.editedMessage) {
       if (exemptUser) return next();
-      if (await isRuleEnabled('no_edit', ctx.chat.id)) {
+      if (rules.no_edit) {
         if (await ensureBotCanDelete(ctx)) {
           try {
           await ctx.api.deleteMessage(ctx.chat.id, ctx.editedMessage.message_id);
           await notifyAndCleanup(
             ctx,
-            `✏️ ${await mentionWithPrefix(ctx, ctx.from, 'no_edit')} <b>Editing is not allowed</b>. Your message was removed.${await maybeSuffix(ctx, 'no_edit')}`
+            `✏️ ${await mentionWithPrefix(ctx, ctx.from, 'no_edit')} <b>Editing is not allowed</b>. Your message was removed.`
           );
           await logAction(ctx, { action: 'delete_message', action_type: 'moderation', violation: 'no_edit', user: ctx.from, chat: ctx.chat, content: ctx.editedMessage?.text || ctx.editedMessage?.caption || '' });
         } catch (_) {}
@@ -444,7 +234,7 @@ export function securityMiddleware() {
   pruneSpamState(now);
 
   if (Number.isFinite(chatId) && Number.isFinite(senderId)) {
-    if ((await isRuleEnabled('anti_flood', chatId)) && isFloodViolation(chatId, senderId, now)) {
+    if (rules.anti_flood && isFloodViolation(chatId, senderId, now)) {
       if (await ensureBotCanDelete(ctx)) {
         try {
           await ctx.api.deleteMessage(chatId, msg.message_id);
@@ -452,7 +242,7 @@ export function securityMiddleware() {
           if (FLOOD_MUTE_SECONDS > 0) {
             try {
               await ctx.api.restrictChatMember(chatId, senderId, {
-                permissions: BLACKLIST_MUTE_PERMISSIONS,
+                permissions: MUTE_PERMISSIONS,
                 until_date: Math.floor(Date.now() / 1000) + FLOOD_MUTE_SECONDS,
               });
               muted = true;
@@ -460,7 +250,7 @@ export function securityMiddleware() {
           }
           await notifyAndCleanup(
             ctx,
-            `⏱️ ${await mentionWithPrefix(ctx, ctx.from, 'anti_flood')} <b>too many messages too quickly</b>. Please slow down.${muted ? ` Muted for ${FLOOD_MUTE_SECONDS}s.` : ''}${await maybeSuffix(ctx, 'anti_flood')}`
+            `⏱️ ${await mentionWithPrefix(ctx, ctx.from, 'anti_flood')} <b>too many messages too quickly</b>. Please slow down.${muted ? ` Muted for ${FLOOD_MUTE_SECONDS}s.` : ''}`
           );
           await logAction(ctx, {
             action: muted ? 'restrict_member' : 'delete_message',
@@ -475,13 +265,13 @@ export function securityMiddleware() {
       return;
     }
 
-    if ((await isRuleEnabled('anti_duplicate', chatId)) && isDuplicateViolation(chatId, senderId, text || pollText, now)) {
+    if (rules.anti_duplicate && isDuplicateViolation(chatId, senderId, text || pollText, now)) {
       if (await ensureBotCanDelete(ctx)) {
         try {
           await ctx.api.deleteMessage(chatId, msg.message_id);
           await notifyAndCleanup(
             ctx,
-            `🌀 ${await mentionWithPrefix(ctx, ctx.from, 'anti_duplicate')} <b>repeated messages are not allowed</b>.${await maybeSuffix(ctx, 'anti_duplicate')}`
+            `🌀 ${await mentionWithPrefix(ctx, ctx.from, 'anti_duplicate')} <b>repeated messages are not allowed</b>.`
           );
           await logAction(ctx, {
             action: 'delete_message',
@@ -496,7 +286,7 @@ export function securityMiddleware() {
       return;
     }
 
-    if ((await isRuleEnabled('new_member_probation', chatId)) && isUnderNewMemberProbation(chatId, senderId, now)) {
+    if (rules.new_member_probation && isUnderNewMemberProbation(chatId, senderId, now)) {
       const probationHasLink = entitiesContainLink(entities) || textHasLink(text) || (pollText ? textHasLink(pollText) : false);
       const probationHasMedia = messageHasMedia(msg);
       if (probationHasLink || probationHasMedia) {
@@ -510,7 +300,7 @@ export function securityMiddleware() {
                 : 'media';
             await notifyAndCleanup(
               ctx,
-              `🛡️ ${await mentionWithPrefix(ctx, ctx.from, 'new_member_probation')} <b>new-member probation is active</b>. ${escapeHtml(reason)} are temporarily restricted.${await maybeSuffix(ctx, 'new_member_probation')}`
+              `🛡️ ${await mentionWithPrefix(ctx, ctx.from, 'new_member_probation')} <b>new-member probation is active</b>. ${escapeHtml(reason)} are temporarily restricted.`
             );
             await logAction(ctx, {
               action: 'delete_message',
@@ -527,108 +317,37 @@ export function securityMiddleware() {
     }
   }
 
-  // AI cross-check helpers
-  const aiEnabled = (() => {
-    const v = String(process.env.AI_ENABLE || '').toLowerCase();
-    return v === '1' || v === 'true' || v === 'yes' || v === 'on';
-  })();
-  const thresholds = { sexual: Number(process.env.AI_THRESH_SEXUAL || 0.7) };
-  function tokenizePlain(s = '') {
-    try { return (String(s).match(/[\p{L}\p{N}@#._-]+/gu) || []).filter((t) => t.length >= 3 && t.length <= 64); } catch { return (String(s).toLowerCase().split(/[^a-z0-9@#._-]+/) || []).filter((t) => t.length >= 3 && t.length <= 64); }
-  }
-  function extractRiskyTokensFrom(s = '') {
-    const tokens = tokenizePlain(s);
-    const out = [];
-    for (const t of tokens) { if (containsExplicit(t)) out.push(t.toLowerCase()); if (out.length >= 200) break; }
-    return out;
-  }
-
   // Display name checks (apply existing rules to member's name)
   // Build a display name string from first/last/username
-  const displayName = [
-    ctx.from?.first_name,
-    ctx.from?.last_name,
-    ctx.from?.username ? `@${ctx.from.username}` : null,
-  ]
-    .filter(Boolean)
-    .join(' ');
-  if (displayName) {
+  const senderDisplayName = displayName(ctx.from);
+  if (senderDisplayName) {
     // Name: no links
-    if ((await isRuleEnabled('no_links', ctx.chat.id)) && textHasLink(displayName)) {
-      // AI cross-check for links in names
-      if (aiEnabled) {
+    if (rules.no_links && textHasLink(senderDisplayName)) {
+      if (await ensureBotCanDelete(ctx)) {
         try {
-          const r = await aiClassifyLinks(displayName);
-          if (r && r.has_link === false) {
-            // allow; continue
-          } else {
-            if (await ensureBotCanDelete(ctx)) {
-              try {
-                await ctx.api.deleteMessage(ctx.chat.id, msg.message_id);
-                await notifyAndCleanup(
-                  ctx,
-                  `🏷️ ${await mentionWithPrefix(ctx, ctx.from, 'name_no_links')} <b>Link in name is not allowed</b>. Please remove links from your display name to participate.${await maybeSuffix(ctx, 'name_no_links')}`
-                );
-                await logAction(ctx, { action: 'delete_message', action_type: 'moderation', violation: 'name_no_links', user: ctx.from, chat: ctx.chat, content: displayName });
-              } catch (_) {}
-            }
-            return;
-          }
-        } catch {}
-      } else {
-        if (await ensureBotCanDelete(ctx)) {
-          try {
-            await ctx.api.deleteMessage(ctx.chat.id, msg.message_id);
-            await notifyAndCleanup(
-              ctx,
-              `🏷️ ${await mentionWithPrefix(ctx, ctx.from, 'name_no_links')} <b>Link in name is not allowed</b>. Please remove links from your display name to participate.${await maybeSuffix(ctx, 'name_no_links')}`
-            );
-            await logAction(ctx, { action: 'delete_message', action_type: 'moderation', violation: 'name_no_links', user: ctx.from, chat: ctx.chat, content: displayName });
-          } catch (_) {}
-        }
-        return;
+          await ctx.api.deleteMessage(ctx.chat.id, msg.message_id);
+          await notifyAndCleanup(
+            ctx,
+            `🏷️ ${await mentionWithPrefix(ctx, ctx.from, 'name_no_links')} <b>Link in name is not allowed</b>. Please remove links from your display name to participate.`
+          );
+          await logAction(ctx, { action: 'delete_message', action_type: 'moderation', violation: 'name_no_links', user: ctx.from, chat: ctx.chat, content: senderDisplayName });
+        } catch (_) {}
       }
+      return;
     }
     // Name: no explicit terms
-    if ((await isRuleEnabled('no_explicit', ctx.chat.id)) && containsExplicit(displayName)) {
-      // AI cross-check sexual; train safelist for false positives
-      if (aiEnabled) {
+    if (rules.no_explicit && containsExplicit(senderDisplayName)) {
+      if (await ensureBotCanDelete(ctx)) {
         try {
-          const r = await aiClassifyText(displayName);
-          if (r) {
-            const s = r.scores || {};
-            const isSexual = (s['sexual'] || 0) >= thresholds.sexual || Boolean(r.categories?.sexual);
-            if (!isSexual && !r.flagged) {
-              try { const toks = extractRiskyTokensFrom(displayName); if (toks.length) await addSafeTerms(toks); } catch {}
-              // allow; continue other rules
-            } else {
-              if (await ensureBotCanDelete(ctx)) {
-                try {
-                  await ctx.api.deleteMessage(ctx.chat.id, msg.message_id);
-                  await notifyAndCleanup(
-                    ctx,
-                    `🏷️ ${await mentionWithPrefix(ctx, ctx.from, 'name_no_explicit')} <b>Explicit content in name</b>. Please change it to participate.${await maybeSuffix(ctx, 'name_no_explicit')}`
-                  );
-                  await logAction(ctx, { action: 'delete_message', action_type: 'moderation', violation: 'name_no_explicit', user: ctx.from, chat: ctx.chat, content: displayName });
-                } catch (_) {}
-              }
-              return;
-            }
-          }
-        } catch {}
-      } else {
-        if (await ensureBotCanDelete(ctx)) {
-          try {
-            await ctx.api.deleteMessage(ctx.chat.id, msg.message_id);
-            await notifyAndCleanup(
-              ctx,
-              `🏷️ ${await mentionWithPrefix(ctx, ctx.from, 'name_no_explicit')} <b>Explicit content in name</b>. Please change it to participate.${await maybeSuffix(ctx, 'name_no_explicit')}`
-            );
-            await logAction(ctx, { action: 'delete_message', action_type: 'moderation', violation: 'name_no_explicit', user: ctx.from, chat: ctx.chat, content: displayName });
-          } catch (_) {}
-        }
-        return;
+          await ctx.api.deleteMessage(ctx.chat.id, msg.message_id);
+          await notifyAndCleanup(
+            ctx,
+            `🏷️ ${await mentionWithPrefix(ctx, ctx.from, 'name_no_explicit')} <b>Explicit content in name</b>. Please change it to participate.`
+          );
+          await logAction(ctx, { action: 'delete_message', action_type: 'moderation', violation: 'name_no_explicit', user: ctx.from, chat: ctx.chat, content: senderDisplayName });
+        } catch (_) {}
       }
+      return;
     }
   }
 
@@ -639,35 +358,12 @@ export function securityMiddleware() {
     // Rule 5 (extended): bio moderation (links or explicit content)
     const userId = ctx.from?.id;
     if (userId) {
-      if (await isRuleEnabled('bio_block', ctx.chat.id)) {
+      if (rules.bio_block) {
         const { hasLink: bioHasLink, hasExplicit: bioHasExplicit, bio: bioText } = await checkUserBioStatus(
           ctx,
           userId,
         );
         if (bioHasLink || bioHasExplicit) {
-          let shouldDelete = true;
-          if (aiEnabled) {
-            try {
-              if (bioHasExplicit && bioText) {
-                const r = await aiClassifyText(bioText);
-                if (r) {
-                  const s = r.scores || {};
-                  const ok = (s['sexual'] || 0) < thresholds.sexual && !r.flagged && !r.categories?.sexual;
-                  if (ok) shouldDelete = false;
-                }
-              }
-              if (shouldDelete && bioHasLink && bioText) {
-                const r2 = await aiClassifyLinks(bioText);
-                if (r2 && r2.has_link === false) shouldDelete = false;
-              }
-            } catch {}
-          }
-          if (!shouldDelete) {
-            if (bioHasExplicit && bioText) {
-              try { const toks = extractRiskyTokensFrom(bioText); if (toks.length) await addSafeTerms(toks); } catch {}
-            }
-            return next();
-          }
           if (await ensureBotCanDelete(ctx)) {
             try {
               await ctx.api.deleteMessage(ctx.chat.id, msg.message_id);
@@ -676,7 +372,7 @@ export function securityMiddleware() {
                 : bioHasLink
                 ? 'a link'
                 : 'explicit content';
-              await notifyAndCleanup(ctx, `🧬 ${await mentionPlainWithPrefix(ctx, ctx.from, 'bio_block')} <b>cannot post</b> because your bio contains ${reason}. Please update your bio to participate.${await maybeSuffix(ctx, 'bio_block')}`);
+              await notifyAndCleanup(ctx, `🧬 ${await mentionPlainWithPrefix(ctx, ctx.from, 'bio_block')} <b>cannot post</b> because your bio contains ${reason}. Please update your bio to participate.`);
               await logAction(ctx, { action: 'delete_message', action_type: 'moderation', violation: 'bio_block', user: ctx.from, chat: ctx.chat, content: bioText ? `[BIO] ${bioText}` : '' });
             } catch (_) {}
           }
@@ -686,7 +382,7 @@ export function securityMiddleware() {
     }
 
     // Rule 1: Max length (default 300)
-    if (await isRuleEnabled('max_len', ctx.chat.id)) {
+    if (rules.max_len) {
       const limit = await getEffectiveMaxLen(ctx.chat.id);
       if (overCharLimit(text, limit)) {
       if (await ensureBotCanDelete(ctx)) {
@@ -694,7 +390,7 @@ export function securityMiddleware() {
           await ctx.api.deleteMessage(ctx.chat.id, msg.message_id);
           await notifyAndCleanup(
             ctx,
-            `📏 ${await mentionWithPrefix(ctx, ctx.from, 'max_len')} <b>messages longer than ${limit} characters</b> are not allowed.${await maybeSuffix(ctx, 'max_len')}`
+            `📏 ${await mentionWithPrefix(ctx, ctx.from, 'max_len')} <b>messages longer than ${limit} characters</b> are not allowed.`
           );
           await logAction(ctx, { action: 'delete_message', action_type: 'moderation', violation: 'max_len', user: ctx.from, chat: ctx.chat, content: text });
         } catch (_) {}
@@ -705,19 +401,11 @@ export function securityMiddleware() {
 
     // Rule 4: No links (also scan poll question/options)
     const hasLink = entitiesContainLink(entities) || textHasLink(text) || (pollText ? textHasLink(pollText) : false);
-    if ((await isRuleEnabled('no_links', ctx.chat.id)) && hasLink) {
-      // AI cross-check to avoid false positives (e.g., obfuscated non-links)
-      if (aiEnabled) {
-        try {
-          const contentStr = text || (pollText ? `[POLL] ${pollText}` : '');
-          const r = await aiClassifyLinks(contentStr);
-          if (r && r.has_link === false) return next();
-        } catch {}
-      }
+    if (rules.no_links && hasLink) {
       if (await ensureBotCanDelete(ctx)) {
         try {
           await ctx.api.deleteMessage(ctx.chat.id, msg.message_id);
-          await notifyAndCleanup(ctx, `🔗 ${await mentionWithPrefix(ctx, ctx.from, 'no_links')} <b>links are not allowed</b> in this group.${await maybeSuffix(ctx, 'no_links')}`);
+          await notifyAndCleanup(ctx, `🔗 ${await mentionWithPrefix(ctx, ctx.from, 'no_links')} <b>links are not allowed</b> in this group.`);
           const contentStr = text || (pollText ? `[POLL] ${pollText}` : '');
           await logAction(ctx, { action: 'delete_message', action_type: 'moderation', violation: 'no_links', user: ctx.from, chat: ctx.chat, content: contentStr });
         } catch (_) {}
@@ -726,28 +414,13 @@ export function securityMiddleware() {
     }
 
     // Rule 3: No explicit content
-    if ((await isRuleEnabled('no_explicit', ctx.chat.id)) && containsExplicit(text || pollText)) {
-      // AI cross-check: if AI does not consider sexual, treat as false positive and learn tokens
-      if (aiEnabled) {
-        try {
-          const contentStr = text || (pollText ? `[POLL] ${pollText}` : '');
-          const r = await aiClassifyText(contentStr);
-          if (r) {
-            const s = r.scores || {};
-            const isSexual = (s['sexual'] || 0) >= thresholds.sexual || Boolean(r.categories?.sexual);
-            if (!isSexual && !r.flagged) {
-              try { const toks = extractRiskyTokensFrom(contentStr); if (toks.length) await addSafeTerms(toks); } catch {}
-              return next();
-            }
-          }
-        } catch {}
-      }
+    if (rules.no_explicit && containsExplicit(text || pollText)) {
       if (await ensureBotCanDelete(ctx)) {
         try {
           await ctx.api.deleteMessage(ctx.chat.id, msg.message_id);
           await notifyAndCleanup(
             ctx,
-            `🚫 ${await mentionWithPrefix(ctx, ctx.from, 'no_explicit')} <b>explicit or sexual content</b> is not allowed.${await maybeSuffix(ctx, 'no_explicit')}`
+            `🚫 ${await mentionWithPrefix(ctx, ctx.from, 'no_explicit')} <b>explicit or sexual content</b> is not allowed.`
           );
           const contentStr = text || (pollText ? `[POLL] ${pollText}` : '');
           await logAction(ctx, { action: 'delete_message', action_type: 'moderation', violation: 'no_explicit', user: ctx.from, chat: ctx.chat, content: contentStr });
@@ -759,43 +432,4 @@ export function securityMiddleware() {
     // No violations; continue to next middleware/handlers
     return next();
   };
-}
-
-async function isBotPrivileged(userId) {
-  if (!Number.isFinite(userId)) return false;
-  if (Number.isFinite(BOT_OWNER_ID) && userId === BOT_OWNER_ID) return true;
-  if (BOT_ADMIN_IDS.has(userId)) return true;
-  try {
-    const s = await getSettings();
-    if (s.bot_admin_ids.includes(userId)) return true;
-  } catch {}
-  return false;
-}
-
-async function isChatAdminOrOwner(ctx, userId) {
-  const chatId = ctx.chat?.id;
-  if (!chatId || !userId) return false;
-  const key = `${chatId}:${userId}`;
-  const now = Date.now();
-  const cached = adminStatusCache.get(key);
-  if (cached && cached.until > now) return cached.isAdmin;
-  try {
-    const member = await ctx.api.getChatMember(chatId, userId);
-    const isAdmin = member?.status === 'administrator' || member?.status === 'creator';
-    adminStatusCache.set(key, { isAdmin, until: now + 5 * 60 * 1000 }); // 5 min TTL
-    return isAdmin;
-  } catch (_) {
-    adminStatusCache.set(key, { isAdmin: false, until: now + 60 * 1000 }); // short TTL on error
-    return false;
-  }
-}
-
-async function isExempt(ctx) {
-  const userId = ctx.from?.id;
-  if (!userId) return false;
-  if (await isBotPrivileged(userId)) return true;
-  if (await isChatAdminOrOwner(ctx, userId)) return true;
-  const chatId = ctx.chat?.id;
-  if (chatId && (await isUserWhitelisted(chatId, userId))) return true;
-  return false;
 }
