@@ -131,7 +131,7 @@ async function sbLoadChat(chatId) {
 
 async function sbSaveChat(chatId, payload) {
   const supabase = getSupabase();
-  if (!supabase) return false;
+  if (!supabase) return { ok: false, error: new Error('Supabase client is not configured') };
   const normalized = normalizeChatSettings(payload);
   const row = {
     chat_id: String(chatId),
@@ -142,14 +142,20 @@ async function sbSaveChat(chatId, payload) {
   const { error } = await supabase
     .from('chat_settings')
     .upsert(row, { onConflict: 'chat_id' });
-  if (error) return false;
+  if (error) return { ok: false, error };
   setChatCache(chatId, normalized);
-  return true;
+  return { ok: true };
 }
 
 async function saveChatSettings(chatId, payload) {
-  const ok = await sbSaveChat(chatId, payload);
-  if (!ok) throw new Error('Failed to sync chat settings');
+  const result = await sbSaveChat(chatId, payload);
+  if (!result.ok) {
+    const detail = result.error?.message || result.error?.details || result.error?.hint || String(result.error || '');
+    const err = new Error(detail ? `Failed to sync chat settings: ${detail}` : 'Failed to sync chat settings');
+    err.cause = result.error;
+    err.chatId = String(chatId);
+    throw err;
+  }
 }
 
 async function getChatSettingsCached(chatId) {

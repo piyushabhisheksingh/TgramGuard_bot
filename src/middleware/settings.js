@@ -236,6 +236,40 @@ export function settingsMiddleware() {
     return sent;
   }
 
+  async function reportChatSettingsSyncFailure(ctx, err) {
+    const desc = String(err?.description || err?.message || err || 'Unknown error');
+    const cause = err?.cause;
+    const causeInfo = cause
+      ? {
+          code: cause.code,
+          details: cause.details,
+          hint: cause.hint,
+          message: cause.message,
+        }
+      : undefined;
+    console.error('[settings] failed to sync chat settings', {
+      chatId: ctx.chat?.id,
+      userId: ctx.from?.id,
+      error: desc,
+      cause: causeInfo,
+    });
+    return replyEphemeral(
+      ctx,
+      `❌ <b>Could not save chat settings.</b>\n<code>${esc(desc.slice(0, 500))}</code>`,
+      { parse_mode: 'HTML' },
+    );
+  }
+
+  async function persistChatSettingsOrReply(ctx, fn) {
+    try {
+      await fn();
+      return true;
+    } catch (err) {
+      await reportChatSettingsSyncFailure(ctx, err);
+      return false;
+    }
+  }
+
   const BL_DELAY_MIN = Math.max(0, Number(process.env.BLACKLIST_ENFORCE_DELAY_MIN_MS || 0));
   const BL_DELAY_MAX_RAW = Number(process.env.BLACKLIST_ENFORCE_DELAY_MAX_MS || 0);
   const BL_DELAY_MAX = Number.isFinite(BL_DELAY_MAX_RAW) && BL_DELAY_MAX_RAW >= BL_DELAY_MIN ? BL_DELAY_MAX_RAW : BL_DELAY_MIN;
@@ -1471,7 +1505,7 @@ export function settingsMiddleware() {
     const userId = ctx.from?.id;
     const ok = (await isBotAdminOrOwner(ctx)) || (await isChatAdminWithBan(ctx, userId));
     if (!ok) return;
-    await setChatRule(String(ctx.chat.id), rule, true);
+    if (!(await persistChatSettingsOrReply(ctx, () => setChatRule(String(ctx.chat.id), rule, true)))) return;
     await logAction(ctx, { action: 'rule_chat_enable', action_type: 'settings', chat: ctx.chat, violation: '-', content: `Enabled ${rule} for chat` });
     return ctx.reply(`✅ <b>Enabled</b> <code>${rule}</code> for this chat.`, { parse_mode: 'HTML' });
   });
@@ -1482,7 +1516,7 @@ export function settingsMiddleware() {
     const userId = ctx.from?.id;
     const ok = (await isBotAdminOrOwner(ctx)) || (await isChatAdminWithBan(ctx, userId));
     if (!ok) return;
-    await setChatRule(String(ctx.chat.id), rule, false);
+    if (!(await persistChatSettingsOrReply(ctx, () => setChatRule(String(ctx.chat.id), rule, false)))) return;
     await logAction(ctx, { action: 'rule_chat_disable', action_type: 'settings', chat: ctx.chat, violation: '-', content: `Disabled ${rule} for chat` });
     return ctx.reply(`🚫 <b>Disabled</b> <code>${rule}</code> for this chat.`, { parse_mode: 'HTML' });
   });
@@ -1520,7 +1554,7 @@ export function settingsMiddleware() {
     if (!ok) return;
     const n = Number(ctx.message.text.trim().split(/\s+/, 2)[1]);
     if (!Number.isFinite(n)) return ctx.reply('💡 <b>Usage:</b> <code>/maxlen_chat_set &lt;number&gt;</code>', { parse_mode: 'HTML' });
-    await setChatMaxLenLimit(String(ctx.chat.id), n);
+    if (!(await persistChatSettingsOrReply(ctx, () => setChatMaxLenLimit(String(ctx.chat.id), n)))) return;
     await logAction(ctx, { action: 'maxlen_chat_set', action_type: 'settings', chat: ctx.chat, violation: '-', content: `Chat max_len=${Math.trunc(n)}` });
     return replyEphemeral(ctx, `✅ <b>Chat max length limit:</b> <code>${Math.trunc(n)}</code>`, { parse_mode: 'HTML' });
   });
@@ -1545,7 +1579,7 @@ export function settingsMiddleware() {
     if (replyFrom?.is_bot) {
       return ctx.reply('🤖 Bots cannot be whitelisted.', { parse_mode: 'HTML' });
     }
-    await addChatWhitelistUser(String(ctx.chat.id), targetId);
+    if (!(await persistChatSettingsOrReply(ctx, () => addChatWhitelistUser(String(ctx.chat.id), targetId)))) return;
     await logAction(ctx, { action: 'whitelist_add', action_type: 'settings', user: replyFrom || { id: targetId }, chat: ctx.chat, violation: '-', content: `Whitelisted user ${targetId}` });
     return replyEphemeral(ctx, `✅ <b>Whitelisted</b> user <code>${targetId}</code> for this chat.`, { parse_mode: 'HTML' });
   });
@@ -1567,7 +1601,7 @@ export function settingsMiddleware() {
     if (replyFrom?.is_bot) {
       return ctx.reply('🤖 Bots cannot be whitelisted.', { parse_mode: 'HTML' });
     }
-    await removeChatWhitelistUser(String(ctx.chat.id), targetId);
+    if (!(await persistChatSettingsOrReply(ctx, () => removeChatWhitelistUser(String(ctx.chat.id), targetId)))) return;
     await logAction(ctx, { action: 'whitelist_remove', action_type: 'settings', user: replyFrom || { id: targetId }, chat: ctx.chat, violation: '-', content: `Removed user ${targetId} from whitelist` });
     return replyEphemeral(ctx, `🗑️ <b>Removed</b> user <code>${targetId}</code> from whitelist.`, { parse_mode: 'HTML' });
   });
