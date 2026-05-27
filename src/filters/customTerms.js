@@ -60,9 +60,12 @@ export const customExplicitTerms = [
 function normalizeLite(s = '') {
   // Keep letters literal; align with filters.normalizeForExplicit.
   let t = String(s).toLowerCase();
-  try { t = t.normalize('NFKD').replace(/\p{M}+/gu, ''); } catch {}
-  // Strip punctuation/symbols but keep whitespace aligned with containsExplicit normalization
-  t = t.replace(/[._\-|*`'"~^+\=\/\\()\[\]{}:,;<>]+/g, ' ');
+  // Strip punctuation/symbols but keep whitespace aligned with containsExplicit normalization.
+  try {
+    t = t.replace(/[\p{P}\p{S}]+/gu, '');
+  } catch {
+    t = t.replace(/[._\-|*`'"~^+\=\/\\()\[\]{}:,;<>]+/g, '');
+  }
   return t.replace(/\s+/g, ' ').trim();
 }
 

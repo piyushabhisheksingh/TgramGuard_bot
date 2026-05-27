@@ -66,8 +66,8 @@ export function overCharLimit(text = "", limit = 300) {
 }
 
 // --- Obfuscation handling ---
-// Only repeated letters are folded. Do not translate leetspeak or homoglyph
-// replacements such as 3 -> e, @ -> a, 0 -> o, or Cyrillic/Greek letters.
+// Only repeated letters and inserted punctuation/symbols are normalized.
+// Do not translate digits, homoglyphs, vowels, or consonants into other letters.
 const MIN_EXPLICIT_TOKEN_LEN = 3;
 
 // Build a loosened variant of patterns (no word boundaries) for normalized scan
@@ -123,22 +123,16 @@ export function replaceHomoglyphsAndLeetspeak(input = '') {
 function normalizeForExplicit(input = '') {
   // Lowercase
   let s = String(input).toLowerCase();
-  // Keep letters literal; only normalize spacing/punctuation and repeated letters below.
+  // Keep letters literal; only normalize punctuation/symbols and repeated letters below.
   s = replaceHomoglyphsAndLeetspeak(s);
-  // Normalize compatibility forms (fullwidth, circled letters, etc.)
-  try { s = s.normalize('NFKC'); } catch {}
   // Remove zero-width, joiner, and soft hyphen characters
   s = s.replace(/[\u200B-\u200D\uFEFF\u2060\u00AD\u180E]/g, '');
-  // NFKD normalize and strip diacritics for Latin script
+  // Remove punctuation and symbols but keep whitespace so normal spaces are not obfuscation.
   try {
-    s = s.normalize('NFKD').replace(/\p{M}+/gu, '');
-  } catch (_) {}
-  // Remove punctuation and symbols but keep whitespace so we don't treat spacing as obfuscation
-  try {
-    s = s.replace(/[\p{P}\p{S}]+/gu, ' ');
+    s = s.replace(/[\p{P}\p{S}]+/gu, '');
   } catch {
     // Fallback for environments without Unicode property escapes
-    s = s.replace(/[._\-\|*`'"~^+\=\/\\()\[\]{}:,;<>]+/g, ' ');
+    s = s.replace(/[._\-\|*`'"~^+\=\/\\()\[\]{}:,;<>]+/g, '');
   }
   // Collapse excessive whitespace for stability while preserving intentional spaces
   s = s.replace(/\s+/g, ' ').trim();
