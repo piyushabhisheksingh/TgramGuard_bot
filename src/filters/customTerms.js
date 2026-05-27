@@ -121,7 +121,7 @@ function loadSafeTxt(filePath) {
   try {
     const raw = fs.readFileSync(filePath, 'utf8');
     const lines = raw.split(/\r?\n/).map((l) => l.trim()).filter((l) => l && !l.startsWith('#'));
-    return lines.flatMap((term) => compileSafeRegexes(term));
+    return lines.filter((term) => isSafeTermCandidate(term)).flatMap((term) => compileSafeRegexes(term));
   } catch { return []; }
 }
 
@@ -132,6 +132,7 @@ function loadSafeJson(filePath) {
     if (!Array.isArray(data)) return [];
     return data
       .filter((term) => typeof term === 'string')
+      .filter((term) => isSafeTermCandidate(term))
       .flatMap((term) => compileSafeRegexes(term));
   } catch { return []; }
 }
@@ -198,7 +199,74 @@ function loadModuleWordlist(moduleName) {
 
 // Only whitelist dictionary terms that collide with risky substrings to avoid over-safelisting
 // Expand risky substrings to capture more benign collisions we want to safelist
-const RISKY_SUBSTRINGS = ['shit', 'tit', 'ass', 'cum', 'gand', 'cock', 'dick', 'anal', 'sex'];
+const RISKY_SUBSTRINGS = ['shit', 'tit', 'ass', 'cum', 'gand', 'cock', 'dick', 'anal', 'sex', 'lund', 'chut', 'jhant', 'jhaat', 'jhat'];
+const UNSAFE_SAFE_TERMS = new Set([
+  'anal',
+  'ass',
+  'balls',
+  'bdsm',
+  'boobs',
+  'chode',
+  'chodu',
+  'choot',
+  'chut',
+  'chutt',
+  'chutiya',
+  'clit',
+  'cock',
+  'cum',
+  'cumshot',
+  'cunt',
+  'dick',
+  'fap',
+  'fetish',
+  'fuck',
+  'gaand',
+  'gand',
+  'gandu',
+  'gaandu',
+  'hentai',
+  'horny',
+  'jizz',
+  'lund',
+  'milf',
+  'nude',
+  'nudes',
+  'porn',
+  'pornhub',
+  'pussy',
+  'rape',
+  'randi',
+  'sex',
+  'sexy',
+  'shit',
+  'slut',
+  'spunk',
+  'tit',
+  'tits',
+  'vagina',
+  'whore',
+  'xxx',
+]);
+
+function normalizeForSafeValidation(term = '') {
+  const normalized = normalizeLite(term).replace(/([a-z\u0900-\u097F])\1{2,}/g, '$1$1');
+  const folded = normalized.replace(/([a-z\u0900-\u097F])\1+/g, '$1');
+  return { normalized, folded };
+}
+
+export function isSafeTermCandidate(term = '') {
+  const { normalized, folded } = normalizeForSafeValidation(term);
+  if (!normalized) return false;
+  if (normalized.length < 4 && folded.length < 4) return false;
+  if (UNSAFE_SAFE_TERMS.has(normalized) || UNSAFE_SAFE_TERMS.has(folded)) return false;
+  const normalizedTokens = normalized.split(/\s+/).filter(Boolean);
+  const foldedTokens = folded.split(/\s+/).filter(Boolean);
+  if (normalizedTokens.some((t) => UNSAFE_SAFE_TERMS.has(t))) return false;
+  if (foldedTokens.some((t) => UNSAFE_SAFE_TERMS.has(t))) return false;
+  if (!RISKY_SUBSTRINGS.some((r) => normalized.includes(r) || folded.includes(r))) return false;
+  return true;
+}
 
 function buildSafeFromList(list = []) {
   try {
@@ -208,7 +276,7 @@ function buildSafeFromList(list = []) {
       if (typeof term !== 'string') continue;
       const normalized = normalizeLite(term);
       if (!normalized) continue;
-      if (!RISKY_SUBSTRINGS.some((r) => normalized.includes(r))) continue;
+      if (!isSafeTermCandidate(term)) continue;
       if (seen.has(normalized)) continue;
       seen.add(normalized);
       out.push(...compileSafeRegexes(term));
@@ -274,6 +342,7 @@ async function loadSafeSupabase() {
     for (const row of rows) {
       const term = String(row.term ?? row.pattern ?? '').trim();
       if (!term) continue;
+      if (!isSafeTermCandidate(term)) continue;
       try {
         const regexes = compileSafeRegexes(term);
         if (regexes.length) customSafePatternsNormalized.push(...regexes);
@@ -288,6 +357,7 @@ try { await loadSafeSupabase(); } catch {}
 export function addSafeTermNormalized(term = '') {
   const raw = String(term || '').trim();
   if (!raw) return false;
+  if (!isSafeTermCandidate(raw)) return false;
   const regexes = compileSafeRegexes(raw);
   if (!regexes.length) return false;
   try { customSafePatternsNormalized.push(...regexes); } catch {}
@@ -349,19 +419,23 @@ export async function addSafeTerms(terms = []) {
   for (const t of terms) {
     const raw = String(t || '').trim();
     if (!raw) continue;
+    if (!isSafeTermCandidate(raw)) continue;
     const n = normalizeLite(raw);
     if (!n) continue;
     try {
-      const rx = new RegExp(escapeRegex(n), 'gi');
-      customSafePatternsNormalized.push(rx);
-      added++;
+      const regexes = compileSafeRegexes(raw);
+      if (!regexes.length) continue;
+      customSafePatternsNormalized.push(...regexes);
+      added += 1;
     } catch {}
     try { fs.appendFileSync(SAFE_TXT, `${raw}\n`); } catch {}
     // Persist the raw phrase for audit, but also persist split words (>=4 chars) as individual safe terms
     rowsTerm.push({ term: raw, created_at: new Date().toISOString() });
     const words = splitWords(raw);
     const now = new Date().toISOString();
-    for (const w of words) rowsWords.push({ term: w, created_at: now });
+    for (const w of words) {
+      if (isSafeTermCandidate(w)) rowsWords.push({ term: w, created_at: now });
+    }
   }
   let persisted = 0;
   let dbError = null;

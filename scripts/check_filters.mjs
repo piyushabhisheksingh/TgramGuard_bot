@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // Quick assertions for explicit detection and safelist false positives
 import { containsExplicit } from '../src/filters.js';
+import { addSafeTerms, isSafeTermCandidate } from '../src/filters/customTerms.js';
 
 const cases = [
   // Safelist false positives — should be false
@@ -38,6 +39,14 @@ const cases = [
   { text: 'mdrchod (hinglish explicit normalised)', expect: true, label: 'hinglish explicit' },
 ];
 
+const safelistCases = [
+  { text: 's-e-x', expect: false, label: 'reject punctuation-only explicit safelist' },
+  { text: 'seeeex', expect: false, label: 'reject repeated-letter explicit safelist' },
+  { text: 'sex education', expect: false, label: 'reject phrase containing exact explicit token' },
+  { text: 'chutney', expect: true, label: 'allow benign risky-substring safelist' },
+  { text: 'classroom', expect: true, label: 'allow benign ass-collision safelist' },
+];
+
 let failures = 0;
 for (const c of cases) {
   let got = false;
@@ -46,6 +55,23 @@ for (const c of cases) {
   // eslint-disable-next-line no-console
   console.log(`${ok ? '✅' : '❌'} ${c.label} — expect=${c.expect} got=${got}`);
   if (!ok) failures++;
+}
+
+for (const c of safelistCases) {
+  let got = false;
+  try { got = isSafeTermCandidate(c.text); } catch (e) { got = `error:${e?.message || e}`; }
+  const ok = got === c.expect;
+  // eslint-disable-next-line no-console
+  console.log(`${ok ? '✅' : '❌'} ${c.label} — expect=${c.expect} got=${got}`);
+  if (!ok) failures++;
+}
+
+const unsafeAdd = await addSafeTerms(['s-e-x', 'seeeex', 'sex education']);
+if (unsafeAdd.added !== 0) {
+  console.log(`❌ unsafe safelist persistence guard — expect=0 got=${unsafeAdd.added}`);
+  failures++;
+} else {
+  console.log('✅ unsafe safelist persistence guard — expect=0 got=0');
 }
 
 if (failures) {
