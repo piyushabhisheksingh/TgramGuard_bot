@@ -219,8 +219,6 @@ export const explicitTerms = [
   /हरामी/u,
   /हरामजादा/u,
   /हरामजादी/u,
-  /कुत्ती/u,
-  /कुत्ते/u,
   // general explicit/profanity (with some spaced/leet variants)
   /\bfuck\b/i,
   /\bf\s*u\s*c\s*k\b/i,

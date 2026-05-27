@@ -34,6 +34,7 @@ const cases = [
   { text: 'kutte', expect: false, label: 'low abuse kutte allowed' },
   { text: 'suar', expect: false, label: 'low abuse suar allowed' },
   { text: 'kutte suar', expect: false, label: 'low abuse phrase allowed' },
+  { text: '꧁𝐒𝐚𝐚𝐦𝐚𝐧𝐞 [🍁]बोलl 𝐤𝐚𝐫𝐨पीठ ᵖᵉᵉᶜʰʰᵉ ᵗᵒ कुत्ते{😅}भौंकते ʰᵃⁱⁿ', expect: false, label: 'decorated Hindi low-abuse text allowed' },
   // Explicit tokens — should be true
   { text: 'sex', expect: true, label: 'sex (explicit)' },
   { text: 's-e-x', expect: true, label: 'single-letter separator obfuscation' },
