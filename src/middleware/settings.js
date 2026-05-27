@@ -22,7 +22,7 @@ import {
   getBlacklistEntry,
 } from '../store/settings.js';
 import { consumeReview } from '../logger.js';
-import { addSafeTerms, addExplicitTerms } from '../filters/customTerms.js';
+import { addSafeTerms, addExplicitTerms, isSafeTermCandidate } from '../filters/customTerms.js';
 import { defaultCommands, adminCommands, ownerPrivateCommands } from '../commands/menu.js';
 import { addExplicitRuntime, containsExplicit } from '../filters.js';
 import { BOT_OWNER_ID, MUTE_PERMISSIONS } from '../config.js';
@@ -454,7 +454,7 @@ export function settingsMiddleware() {
     let out = [];
     for (const t of tokens) {
       const low = t.toLowerCase();
-      if (containsExplicit(low)) {
+      if (containsExplicit(low) || isSafeTermCandidate(low)) {
         out = [...out, low];
         if (out.length >= limit) break;
       };

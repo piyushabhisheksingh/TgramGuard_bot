@@ -200,6 +200,10 @@ function loadModuleWordlist(moduleName) {
 // Only whitelist dictionary terms that collide with risky substrings to avoid over-safelisting
 // Expand risky substrings to capture more benign collisions we want to safelist
 const RISKY_SUBSTRINGS = ['shit', 'tit', 'ass', 'cum', 'gand', 'cock', 'dick', 'anal', 'sex', 'lund', 'chut', 'jhant', 'jhaat', 'jhat'];
+const ALLOWED_SAFE_TERMS = new Set([
+  'chhotu',
+  'chotu',
+]);
 const UNSAFE_SAFE_TERMS = new Set([
   'anal',
   'ass',
@@ -264,6 +268,7 @@ export function isSafeTermCandidate(term = '') {
   const foldedTokens = folded.split(/\s+/).filter(Boolean);
   if (normalizedTokens.some((t) => UNSAFE_SAFE_TERMS.has(t))) return false;
   if (foldedTokens.some((t) => UNSAFE_SAFE_TERMS.has(t))) return false;
+  if (ALLOWED_SAFE_TERMS.has(normalized) || ALLOWED_SAFE_TERMS.has(folded)) return true;
   if (!RISKY_SUBSTRINGS.some((r) => normalized.includes(r) || folded.includes(r))) return false;
   return true;
 }

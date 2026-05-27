@@ -43,6 +43,8 @@ const safelistCases = [
   { text: 's-e-x', expect: false, label: 'reject punctuation-only explicit safelist' },
   { text: 'seeeex', expect: false, label: 'reject repeated-letter explicit safelist' },
   { text: 'sex education', expect: false, label: 'reject phrase containing exact explicit token' },
+  { text: 'chhotu', expect: true, label: 'allow chhotu safelist' },
+  { text: 'chotu', expect: true, label: 'allow chotu safelist' },
   { text: 'chutney', expect: true, label: 'allow benign risky-substring safelist' },
   { text: 'classroom', expect: true, label: 'allow benign ass-collision safelist' },
 ];
