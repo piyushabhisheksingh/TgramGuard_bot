@@ -116,42 +116,14 @@ export function addExplicitRuntime(terms = []) {
   return added;
 }
 
-// --- Digit/Symbol and Homoglyph Replacement Maps ---
-// Maps for converting leetspeak digits and symbols to their letter equivalents
-const DIGIT_SYMBOL_MAP = {
-  '0': 'o', '1': 'i', '3': 'e', '4': 'a', '5': 's', '7': 't', '8': 'b', '9': 'g',
-  '@': 'a', '$': 's', '!': 'i', '|': 'i', '%': 's', '^': 'a', '&': 'and', '+': 't'
-};
-
-// Homoglyph map: Cyrillic, Greek, and other Unicode characters that visually resemble Latin letters
-const HOMOGLYPH_MAP = {
-  // Cyrillic lookalikes
-  'а': 'a', 'е': 'e', 'о': 'o', 'р': 'p', 'с': 'c', 'т': 't', 'у': 'y', 'х': 'x', 'н': 'h', 'м': 'm', 'в': 'b', 'к': 'k', 'ё': 'e',
-  // Greek lookalikes
-  'α': 'a', 'β': 'b', 'γ': 'g', 'δ': 'd', 'ε': 'e', 'ζ': 'z', 'η': 'h', 'θ': 'o', 'ι': 'i', 'κ': 'k', 'ν': 'v', 'ο': 'o', 'ρ': 'p', 'τ': 't', 'υ': 'y', 'φ': 'o', 'χ': 'x', 'ψ': 'y', 'ω': 'w',
-  // Additional script lookalikes
-  'ѐ': 'e', 'ё': 'e', 'і': 'i', 'ї': 'i', 'ў': 'u',
-  // Full-width variants
-  'ａ': 'a', 'ｂ': 'b', 'ｃ': 'c', 'ｄ': 'd', 'ｅ': 'e', 'ｆ': 'f', 'ｇ': 'g', 'ｈ': 'h', 'ｉ': 'i', 'ｊ': 'j', 'ｋ': 'k', 'ｌ': 'l', 'ｍ': 'm', 'ｎ': 'n', 'ｏ': 'o', 'ｐ': 'p', 'ｑ': 'q', 'ｒ': 'r', 'ｓ': 's', 'ｔ': 't', 'ｕ': 'u', 'ｖ': 'v', 'ｗ': 'w', 'ｘ': 'x', 'ｙ': 'y', 'ｚ': 'z'
-};
-
 export function replaceHomoglyphsAndLeetspeak(input = '') {
-  let s = String(input);
-  // Replace homoglyphs with their Latin equivalents
-  for (const [source, target] of Object.entries(HOMOGLYPH_MAP)) {
-    s = s.split(source).join(target);
-  }
-  // Replace digits and symbols with their letter equivalents
-  for (const [source, target] of Object.entries(DIGIT_SYMBOL_MAP)) {
-    s = s.split(source).join(target);
-  }
-  return s;
+  return String(input);
 }
 
 function normalizeForExplicit(input = '') {
   // Lowercase
   let s = String(input).toLowerCase();
-  // Replace digits, symbols, and homoglyphs with Latin letters for 100% matching
+  // Keep letters literal; only normalize spacing/punctuation and repeated letters below.
   s = replaceHomoglyphsAndLeetspeak(s);
   // Normalize compatibility forms (fullwidth, circled letters, etc.)
   try { s = s.normalize('NFKC'); } catch {}

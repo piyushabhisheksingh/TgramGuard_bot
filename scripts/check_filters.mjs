@@ -20,6 +20,8 @@ const cases = [
   { text: 'Renew my passport and passphrase.', expect: false, label: 'passport/passphrase (benign)' },
   // Normalized obfuscations still benign
   { text: 'Analy\u00adsis (soft hyphen) remains benign', expect: false, label: 'analysis with soft hyphen' },
+  { text: 's3x', expect: false, label: 'no digit-to-letter replacement' },
+  { text: 'ѕех', expect: false, label: 'no homoglyph-to-letter replacement' },
   // Explicit tokens — should be true
   { text: 'sex', expect: true, label: 'sex (explicit)' },
   { text: 'pornhub link omitted', expect: true, label: 'pornhub (explicit)' },
