@@ -2,6 +2,7 @@
 // Quick assertions for explicit detection and safelist false positives
 import { containsExplicit } from '../src/filters.js';
 import { addSafeTerms, isSafeTermCandidate } from '../src/filters/customTerms.js';
+import { securityMiddleware } from '../src/middleware/security.js';
 
 const cases = [
   // Safelist false positives — should be false
@@ -74,6 +75,32 @@ if (unsafeAdd.added !== 0) {
   failures++;
 } else {
   console.log('✅ unsafe safelist persistence guard — expect=0 got=0');
+}
+
+let deletes = 0;
+let nexts = 0;
+const ctx = {
+  chat: { id: -100123, type: 'supergroup', title: 'Test Group' },
+  from: { id: 123456, first_name: 'Tester' },
+  msg: { message_id: 1, text: 'chhotu' },
+  me: { id: 999999 },
+  api: {
+    getChatMember: async (_chatId, userId) => (
+      userId === 999999
+        ? { status: 'administrator', can_delete_messages: true }
+        : { status: 'member' }
+    ),
+    getChat: async () => ({ bio: '' }),
+    deleteMessage: async () => { deletes += 1; },
+    sendMessage: async () => ({ message_id: 2 }),
+  },
+};
+await securityMiddleware()(ctx, async () => { nexts += 1; });
+if (deletes !== 0 || nexts !== 1) {
+  console.log(`❌ security middleware keeps chhotu — expect deletes=0 nexts=1 got deletes=${deletes} nexts=${nexts}`);
+  failures++;
+} else {
+  console.log('✅ security middleware keeps chhotu — expect deletes=0 nexts=1');
 }
 
 if (failures) {
