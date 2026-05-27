@@ -22,8 +22,14 @@ const cases = [
   { text: 'Analy\u00adsis (soft hyphen) remains benign', expect: false, label: 'analysis with soft hyphen' },
   { text: 's3x', expect: false, label: 'no digit-to-letter replacement' },
   { text: 'ѕех', expect: false, label: 'no homoglyph-to-letter replacement' },
+  { text: 'chhotu', expect: false, label: 'no consonant/vowel substitution: chhotu' },
+  { text: 'chotu', expect: false, label: 'no vowel substitution: chotu' },
+  { text: 'chotiya', expect: false, label: 'no vowel substitution: chotiya' },
   // Explicit tokens — should be true
   { text: 'sex', expect: true, label: 'sex (explicit)' },
+  { text: 'chut', expect: true, label: 'chut (explicit)' },
+  { text: 'choot', expect: true, label: 'choot (explicit)' },
+  { text: 'chutiya', expect: true, label: 'chutiya (explicit)' },
   { text: 'pornhub link omitted', expect: true, label: 'pornhub (explicit)' },
   { text: 'mdrchod (hinglish explicit normalised)', expect: true, label: 'hinglish explicit' },
 ];
