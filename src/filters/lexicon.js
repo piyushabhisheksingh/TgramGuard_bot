@@ -36,8 +36,11 @@ const baseSafePatterns = [
   /weathercocks?/gi,
   /hancocks?/gi,
   /cocktails?/gi,
+  /cock\s+tails?/gi,
   /shuttlecocks?|stopcocks?|ballcocks?/gi,
+  /shuttle\s+cocks?|stop\s+cocks?|ball\s+cocks?/gi,
   /cockroaches?|cockatoos?|cockerels?|cockneys?/gi,
+  /cock\s+roaches?|cock\s+atoos?|cock\s+erels?|cock\s+neys?/gi,
   /cockburn/gi,
   // "dick" benign names/titles
   /(dickens|dickenson|dickinson|dickinsonian|dickerson|dickson|dickey|dicky|riddick)/gi,

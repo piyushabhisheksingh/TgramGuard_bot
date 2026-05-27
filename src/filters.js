@@ -34,25 +34,22 @@ export function containsExplicit(text = "") {
   // Pre-strip common benign collisions with "sex" to reduce noise
   try { normalized = normalized.replace(/sexagesimal|sexton(s)?/gi, ''); } catch {}
   // Quick precheck: if nothing resembles explicit even before stripping, bail out
+  const scanTargets = getExplicitScanTargets(text, normalized);
   const preHit =
-    hasExplicitPatternOfMinimumLength(normalized, explicitTermsLoose) ||
-    hasExplicitPatternOfMinimumLength(foldRepeatedLetters(normalized), explicitTermsLoose) ||
-    hasExplicitPatternOfMinimumLength(normalized, runtimeExplicitLoose) ||
-    hasExplicitPatternOfMinimumLength(foldRepeatedLetters(normalized), runtimeExplicitLoose) ||
+    scanTargets.some((target) => hasExplicitPatternOfMinimumLength(target, explicitTermsLoose)) ||
+    scanTargets.some((target) => hasExplicitPatternOfMinimumLength(target, runtimeExplicitLoose)) ||
     // Optional: token-based profanity check via `allprofanity` package if installed
     hasProfanityToken(text);
   if (!preHit) return false;
   // Strip safe segments and retest to reduce false positives (e.g., class, analysis, gandhi)
-  const stripped = stripSafeSegments(normalized);
+  const strippedTargets = scanTargets.map((target) => stripSafeSegments(target));
   const hitLoose =
-    hasExplicitPatternOfMinimumLength(stripped, explicitTermsLoose) ||
-    hasExplicitPatternOfMinimumLength(foldRepeatedLetters(stripped), explicitTermsLoose) ||
-    hasExplicitPatternOfMinimumLength(stripped, runtimeExplicitLoose) ||
-    hasExplicitPatternOfMinimumLength(foldRepeatedLetters(stripped), runtimeExplicitLoose);
+    strippedTargets.some((target) => hasExplicitPatternOfMinimumLength(target, explicitTermsLoose)) ||
+    strippedTargets.some((target) => hasExplicitPatternOfMinimumLength(target, runtimeExplicitLoose));
   if (!hitLoose) return false;
   // Special-case guard: if only 'sex' remains but the raw text contains benign terms like 'sexton' or 'sexagesimal', treat as benign
   try {
-    if (/sex/i.test(stripped)) {
+    if (strippedTargets.some((target) => /sex/i.test(target))) {
       const raw = String(text).toLowerCase();
       if (/(^|\b)(sexton(s)?|sexagesimal(s)?|sexagenarian(s)?|unisex|asexual(ly|ity)?|middlesex|wessex|sussex|essex)(\b|$)/.test(raw)) return false;
     }
@@ -127,22 +124,51 @@ function normalizeForExplicit(input = '') {
   s = replaceHomoglyphsAndLeetspeak(s);
   // Remove zero-width, joiner, and soft hyphen characters
   s = s.replace(/[\u200B-\u200D\uFEFF\u2060\u00AD\u180E]/g, '');
-  // Remove punctuation and symbols but keep whitespace so normal spaces are not obfuscation.
+  // Treat punctuation and symbols as separators for normal text.
   try {
-    s = s.replace(/[\p{P}\p{S}]+/gu, '');
+    s = s.replace(/[\p{P}\p{S}]+/gu, ' ');
   } catch {
     // Fallback for environments without Unicode property escapes
-    s = s.replace(/[._\-\|*`'"~^+\=\/\\()\[\]{}:,;<>]+/g, '');
+    s = s.replace(/[._\-\|*`'"~^+\=\/\\()\[\]{}:,;<>]+/g, ' ');
   }
   // Collapse excessive whitespace for stability while preserving intentional spaces
   s = s.replace(/\s+/g, ' ').trim();
-  // Collapse repeated characters (3+ → 2) for stable safelist matching.
-  s = s.replace(/([a-z\u0900-\u097F])\1{2,}/g, '$1$1');
   return s;
 }
 
+function normalizeSpecialCharObfuscations(input = '') {
+  const out = [];
+  const rawTokens = String(input).toLowerCase().split(/\s+/).filter(Boolean);
+  for (const token of rawTokens) {
+    if (!/[^\p{L}\p{N}]/u.test(token)) continue;
+    const singleLettersSeparated = /^[\p{L}\p{N}](?:[^\p{L}\p{N}]+[\p{L}\p{N}]){2,}$/u.test(token);
+    if (!singleLettersSeparated) continue;
+    let compact = token;
+    try {
+      compact = compact.replace(/[\p{P}\p{S}]+/gu, '');
+    } catch {
+      compact = compact.replace(/[._\-\|*`'"~^+\=\/\\()\[\]{}:,;<>]+/g, '');
+    }
+    if (compact) out.push(compact);
+  }
+  return out;
+}
+
+function getExplicitScanTargets(raw = '', normalized = normalizeForExplicit(raw)) {
+  const targets = new Set();
+  const add = (value) => {
+    const s = String(value || '').trim();
+    if (!s) return;
+    targets.add(s);
+    targets.add(foldRepeatedLetters(s));
+  };
+  add(normalized);
+  for (const compact of normalizeSpecialCharObfuscations(raw)) add(compact);
+  return Array.from(targets);
+}
+
 function foldRepeatedLetters(value = '') {
-  return String(value).replace(/([a-z\u0900-\u097F])\1+/g, '$1');
+  return String(value).replace(/([a-z\u0900-\u097F])\1{2,}/g, '$1');
 }
 
 function normalizedTokenLength(value = '') {

@@ -157,9 +157,6 @@ export const explicitTerms = [
   /\bjhatu\b/i,
   /\bkamina\b/i,
   /\bharaami(yada|zada)?\b/i,
-  /\b(kutti|kutiya|kuttiya)\b/i,
-  /\bkutte\b/i,
-  /\bkutte\s*ki\b/i,
   // Hinglish phrase slangs
   /(bhen|behen|bahen)\s*ki\s*(chut|choot|chutt)\b/i,
   /(bhen|behen|bahen)\s*ke\s*pakod(e|ey|e)?\b/i,
@@ -176,7 +173,6 @@ export const explicitTerms = [
   /(lund|lauda|laude|loda|lode)\s*ch(us|oos)[a-z]*\b/i,
   /(teri|tera|tumhari)\s*(maa|ma|ammi|mummy)\s*ki\s*(chut|choot|chutt)\b/i,
   /(teri|tera|tumhari)\s*(behen|bhen|bahen)\s*(ki|ke)\s*(chut|choot|chutt|lauda|laude|loda|lode)\b/i,
-  /(suar|sooar|suwar|kutte?)\s*ke\s*(bacche|bache|bacha|aulaad)\b/i,
   /(gaand|gand)\s*(faad|fad|faadu|fadu|faado|fado|faade|fade)\b/i,
   /saali\s*randi\b/i,
   /\b(mkc|bkc)\b/i,

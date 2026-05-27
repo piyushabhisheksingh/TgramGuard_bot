@@ -60,11 +60,11 @@ export const customExplicitTerms = [
 function normalizeLite(s = '') {
   // Keep letters literal; align with filters.normalizeForExplicit.
   let t = String(s).toLowerCase();
-  // Strip punctuation/symbols but keep whitespace aligned with containsExplicit normalization.
+  // Treat punctuation/symbols as separators, aligned with containsExplicit normalization.
   try {
-    t = t.replace(/[\p{P}\p{S}]+/gu, '');
+    t = t.replace(/[\p{P}\p{S}]+/gu, ' ');
   } catch {
-    t = t.replace(/[._\-|*`'"~^+\=\/\\()\[\]{}:,;<>]+/g, '');
+    t = t.replace(/[._\-|*`'"~^+\=\/\\()\[\]{}:,;<>]+/g, ' ');
   }
   return t.replace(/\s+/g, ' ').trim();
 }
